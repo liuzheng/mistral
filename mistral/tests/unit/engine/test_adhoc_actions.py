@@ -46,6 +46,25 @@ actions:
     base-input:
       output: '{{ env().foo }}'
 
+  nested_concat:
+    base: my_wb.concat_twice
+    base-input:
+      s2: '{{ _.n2 }}'
+    input:
+      - n2: 'b'
+    output:
+      nested_concat: '{{ _ }}'
+
+  missing_base:
+    base: wrong
+    input:
+      - some_input
+
+  nested_missing_base:
+    base: missing_base
+    input:
+      - some_input
+
 workflows:
   wf1:
     type: direct
@@ -100,6 +119,41 @@ workflows:
         publish:
           printenv_result: '{{ task().result }}'
 
+  wf5:
+    type: direct
+    output:
+      workflow_result: '{{ _.nested_result }}'
+    tasks:
+      nested_test:
+        action: nested_concat
+        publish:
+          nested_result: '{{ task().result }}'
+
+  wf6:
+    type: direct
+    output:
+      workflow_result: '{{ _.missing_result }}'
+    tasks:
+      missing_action:
+        action: missing_base
+        on-complete:
+          - next_action
+      next_action:
+        publish:
+          missing_result: 'Finished'
+
+  wf7:
+    type: direct
+    output:
+      workflow_result: '{{ _.missing_result }}'
+    tasks:
+      nested_missing_action:
+        action: nested_missing_base
+        on-complete:
+          - next_action
+      next_action:
+        publish:
+          missing_result: 'Finished'
 """
 
 
@@ -172,3 +226,47 @@ class AdhocActionsTest(base.EngineTestCase):
                 },
                 wf_ex.output
             )
+
+    def test_run_nested_adhoc_with_output(self):
+        wf_ex = self.engine.start_workflow(
+            'my_wb.wf5', '')
+
+        self.await_workflow_success(wf_ex.id)
+        with db_api.transaction():
+            wf_ex = db_api.get_workflow_execution(wf_ex.id)
+
+            self.assertDictEqual(
+                {
+                    'workflow_result': {'nested_concat': 'a+b and a+b'}
+                },
+                wf_ex.output
+            )
+
+    def test_missing_adhoc_action_definition(self):
+        wf_ex = self.engine.start_workflow(
+            'my_wb.wf6', '')
+        self.await_workflow_error(wf_ex.id)
+        with db_api.transaction():
+            # Note: We need to reread execution to access related tasks.
+            wf_ex = db_api.get_workflow_execution(wf_ex.id)
+
+            tasks = wf_ex.task_executions
+
+            task1 = self._assert_single_item(tasks, name='missing_action')
+
+        self.assertEqual(states.ERROR, task1.state)
+
+    def test_nested_missing_adhoc_action_definition(self):
+        wf_ex = self.engine.start_workflow(
+            'my_wb.wf7', '')
+        self.await_workflow_error(wf_ex.id)
+        with db_api.transaction():
+            # Note: We need to reread execution to access related tasks.
+            wf_ex = db_api.get_workflow_execution(wf_ex.id)
+
+            tasks = wf_ex.task_executions
+
+            task1 = self._assert_single_item(tasks,
+                                             name='nested_missing_action')
+
+        self.assertEqual(states.ERROR, task1.state)

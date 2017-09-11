@@ -416,18 +416,14 @@ class RegularTask(Task):
 
     @profiler.trace('regular-task-get-action-input', hide_args=True)
     def _get_action_input(self, ctx=None):
-        ctx = ctx or self.ctx
+        input_dict = self._evaluate_expression(self.task_spec.get_input(), ctx)
 
-        ctx_view = data_flow.ContextView(
-            ctx,
-            self.wf_ex.context,
-            self.wf_ex.input
-        )
-
-        input_dict = expr.evaluate_recursively(
-            self.task_spec.get_input(),
-            ctx_view
-        )
+        if not isinstance(input_dict, dict):
+            raise exc.InputException(
+                "Wrong dynamic input for task: %s. Dict type is expected. "
+                "Actual type: %s. Actual value: %s" %
+                (self.task_spec.get_name(), type(input_dict), str(input_dict))
+            )
 
         return utils.merge_dicts(
             input_dict,
@@ -435,12 +431,28 @@ class RegularTask(Task):
             overwrite=False
         )
 
+    def _evaluate_expression(self, expression, ctx=None):
+        ctx = ctx or self.ctx
+        ctx_view = data_flow.ContextView(
+            ctx,
+            self.wf_ex.context,
+            self.wf_ex.input
+        )
+        input_dict = expr.evaluate_recursively(
+            expression,
+            ctx_view
+        )
+        return input_dict
+
     def _build_action(self):
         action_name = self.task_spec.get_action_name()
         wf_name = self.task_spec.get_workflow_name()
 
         if wf_name:
-            return actions.WorkflowAction(wf_name, task_ex=self.task_ex)
+            return actions.WorkflowAction(
+                wf_name=self._evaluate_expression(wf_name),
+                task_ex=self.task_ex
+            )
 
         if not action_name:
             action_name = 'std.noop'
@@ -480,52 +492,41 @@ class WithItemsTask(RegularTask):
     def on_action_complete(self, action_ex):
         assert self.task_ex
 
-        if (not self._get_concurrency() and
-                not self.task_spec.get_policies().get_retry()):
-            self._on_action_complete(action_ex)
-        else:
-            # If we need to control 'concurrency' we need to do atomic
-            # reads/writes to task runtime context. Locking prevents us
-            # from modifying runtime context simultaneously by multiple
-            # transactions.
-            with db_api.named_lock('with-items-%s' % self.task_ex.id):
-                # NOTE: We need to refresh task execution object right
-                # after the lock is acquired to make sure that we're
-                # working with a fresh state of its runtime context.
-                # Otherwise, SQLAlchemy session can contain a stale
-                # cached version of it so that we don't modify actual
-                # values (i.e. capacity).
-                db_api.refresh(self.task_ex)
+        with db_api.named_lock('with-items-%s' % self.task_ex.id):
+            # NOTE: We need to refresh task execution object right
+            # after the lock is acquired to make sure that we're
+            # working with a fresh state of its runtime context.
+            # Otherwise, SQLAlchemy session can contain a stale
+            # cached version of it so that we don't modify actual
+            # values (i.e. capacity).
+            db_api.refresh(self.task_ex)
 
-                self._on_action_complete(action_ex)
+            if self.is_completed():
+                return
 
-    def _on_action_complete(self, action_ex):
-        if self.is_completed():
-            return
+            self._increase_capacity()
 
-        self._increase_capacity()
+            if self.is_with_items_completed():
+                state = self._get_final_state()
 
-        if self.is_with_items_completed():
-            state = self._get_final_state()
+                # TODO(rakhmerov): Here we can define more informative messages
+                # in cases when action is successful and when it's not.
+                # For example, in state_info we can specify the cause action.
+                # The use of action_ex.output.get('result') for state_info is
+                # not accurate because there could be action executions that
+                # had failed or was cancelled prior to this action execution.
+                state_info = {
+                    states.SUCCESS: None,
+                    states.ERROR: 'One or more actions had failed.',
+                    states.CANCELLED: 'One or more actions was cancelled.'
+                }
 
-            # TODO(rakhmerov): Here we can define more informative messages
-            # in cases when action is successful and when it's not.
-            # For example, in state_info we can specify the cause action.
-            # The use of action_ex.output.get('result') for state_info is not
-            # accurate because there could be action executions that had
-            # failed or was cancelled prior to this action execution.
-            state_info = {
-                states.SUCCESS: None,
-                states.ERROR: 'One or more actions had failed.',
-                states.CANCELLED: 'One or more actions was cancelled.'
-            }
+                self.complete(state, state_info[state])
 
-            self.complete(state, state_info[state])
+                return
 
-            return
-
-        if self._has_more_iterations() and self._get_concurrency():
-            self._schedule_actions()
+            if self._has_more_iterations() and self._get_concurrency():
+                self._schedule_actions()
 
     def _schedule_actions(self):
         with_items_values = self._get_with_items_values()

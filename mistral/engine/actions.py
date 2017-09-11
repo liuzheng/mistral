@@ -361,9 +361,16 @@ class AdHocAction(PythonAction):
                  wf_ctx=None):
         self.action_spec = spec_parser.get_action_spec(action_def.spec)
 
-        base_action_def = db_api.get_action_definition(
-            self.action_spec.get_base()
-        )
+        try:
+            base_action_def = db_api.get_action_definition(
+                self.action_spec.get_base()
+            )
+        except exc.DBEntityNotFoundError:
+            raise exc.InvalidActionException(
+                "Failed to find action [action_name=%s]" %
+                self.action_spec.get_base()
+            )
+
         base_action_def = self._gather_base_actions(
             action_def, base_action_def
         )
@@ -393,14 +400,15 @@ class AdHocAction(PythonAction):
         )
 
     def _prepare_input(self, input_dict):
-        for k, v in self.action_spec.get_input().items():
-            if k not in input_dict or input_dict[k] is utils.NotDefined:
-                input_dict[k] = v
-
         base_input_dict = input_dict
 
         for action_def in self.adhoc_action_defs:
             action_spec = spec_parser.get_action_spec(action_def.spec)
+            for k, v in action_spec.get_input().items():
+                if (k not in base_input_dict or
+                        base_input_dict[k] is utils.NotDefined):
+                    base_input_dict[k] = v
+
             base_input_expr = action_spec.get_base_input()
 
             if base_input_expr:
@@ -421,17 +429,19 @@ class AdHocAction(PythonAction):
     def _prepare_output(self, result):
         # In case of error, we don't transform a result.
         if not result.is_error():
-            adhoc_action_spec = spec_parser.get_action_spec(
-                self.adhoc_action_def.spec
-            )
-
-            transformer = adhoc_action_spec.get_output()
-
-            if transformer is not None:
-                result = ml_actions.Result(
-                    data=expr.evaluate_recursively(transformer, result.data),
-                    error=result.error
+            for action_def in reversed(self.adhoc_action_defs):
+                adhoc_action_spec = spec_parser.get_action_spec(
+                    action_def.spec
                 )
+
+                transformer = adhoc_action_spec.get_output()
+
+                if transformer is not None:
+                    result = ml_actions.Result(
+                        data=expr.evaluate_recursively(transformer,
+                                                       result.data),
+                        error=result.error
+                    )
 
         return result
 
@@ -474,7 +484,12 @@ class AdHocAction(PythonAction):
             self.adhoc_action_defs.append(base)
 
             base_name = base.spec['base']
-            base = db_api.get_action_definition(base_name)
+            try:
+                base = db_api.get_action_definition(base_name)
+            except exc.DBEntityNotFoundError:
+                raise exc.InvalidActionException(
+                    "Failed to find action [action_name=%s]" % base_name
+                )
 
         # if the action is repeated
         if base.name in action_names:
@@ -488,6 +503,10 @@ class AdHocAction(PythonAction):
 
 class WorkflowAction(Action):
     """Workflow action."""
+
+    def __init__(self, wf_name, **kwargs):
+        super(WorkflowAction, self).__init__(None, **kwargs)
+        self.wf_name = wf_name
 
     @profiler.trace('workflow-action-complete', hide_args=True)
     def complete(self, result):
@@ -503,15 +522,11 @@ class WorkflowAction(Action):
             parent_wf_ex.id
         )
 
-        task_spec = spec_parser.get_task_spec(self.task_ex.spec)
-
-        wf_spec_name = task_spec.get_workflow_name()
-
         wf_def = engine_utils.resolve_workflow_definition(
             parent_wf_ex.workflow_name,
             parent_wf_spec.get_name(),
             namespace=parent_wf_ex.params['namespace'],
-            wf_spec_name=wf_spec_name
+            wf_spec_name=self.wf_name
         )
 
         wf_spec = spec_parser.get_workflow_spec_by_definition_id(
