@@ -216,8 +216,17 @@ class Task(object):
             return
 
         # Update only if state transition is valid.
-        if states.is_valid_transition(self.task_ex.state, state):
-            self.set_state(state, state_info)
+        if not states.is_valid_transition(self.task_ex.state, state):
+            return
+
+        # We can't set the task state to RUNNING if some other
+        # child executions are paused.
+        child_states = [a_ex.state for a_ex in self.task_ex.executions]
+
+        if state == states.RUNNING and states.PAUSED in child_states:
+            return
+
+        self.set_state(state, state_info)
 
     def _before_task_start(self):
         policies_spec = self.task_spec.get_policies()
@@ -448,11 +457,16 @@ class RegularTask(Task):
         action_name = self.task_spec.get_action_name()
         wf_name = self.task_spec.get_workflow_name()
 
+        # For dynamic workflow evaluation we regenerate the action.
         if wf_name:
             return actions.WorkflowAction(
                 wf_name=self._evaluate_expression(wf_name),
                 task_ex=self.task_ex
             )
+
+        # For dynamic action evaluation we just regenerate the name.
+        if action_name:
+            action_name = self._evaluate_expression(action_name)
 
         if not action_name:
             action_name = 'std.noop'

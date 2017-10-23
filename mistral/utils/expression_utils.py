@@ -17,6 +17,7 @@ from functools import partial
 
 from oslo_serialization import jsonutils
 from stevedore import extension
+import yaml
 import yaql
 
 from mistral.db.v2 import api as db_api
@@ -109,7 +110,8 @@ def execution_(context):
         'spec': wf_ex.spec,
         'input': wf_ex.input,
         'params': wf_ex.params,
-        'created_at': wf_ex.created_at.isoformat(' ')
+        'created_at': wf_ex.created_at.isoformat(' '),
+        'updated_at': wf_ex.updated_at.isoformat(' ')
     }
 
 
@@ -118,6 +120,10 @@ def json_pp_(context, data=None):
         data or context,
         indent=4
     ).replace("\\n", "\n").replace(" \n", "\n")
+
+
+def yaml_dump_(context, data):
+    return yaml.safe_dump(data, default_flow_style=False)
 
 
 def task_(context, task_name=None):
@@ -256,7 +262,9 @@ def _convert_to_user_model(task_ex):
         'result': data_flow.get_task_execution_result(task_ex),
         'published': task_ex.published,
         'type': task_ex.type,
-        'workflow_execution_id': task_ex.workflow_execution_id
+        'workflow_execution_id': task_ex.workflow_execution_id,
+        'created_at': task_ex.created_at.isoformat(' '),
+        'updated_at': task_ex.updated_at.isoformat(' ')
     }
 
 
@@ -268,3 +276,11 @@ def global_(context, var_name):
     wf_ex = db_api.get_workflow_execution(context['__execution']['id'])
 
     return wf_ex.context.get(var_name)
+
+
+def json_parse_(context, data):
+    return jsonutils.loads(data)
+
+
+def yaml_parse_(context, data):
+    return yaml.safe_load(data)

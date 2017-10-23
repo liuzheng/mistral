@@ -31,10 +31,10 @@ LOG = log.getLogger(__name__)
 CONF = cfg.CONF
 
 
-IRONIC_API_VERSION = '1.22'
+IRONIC_API_VERSION = '1.34'
 """The default microversion to pass to Ironic API.
 
-1.22 corresponds to Newton final.
+1.34 corresponds to Pike final.
 """
 
 
@@ -285,11 +285,16 @@ class MistralAction(base.OpenStackAction):
 
         LOG.debug("Mistral action security context: %s", context)
 
-        session_and_auth = self.get_session_and_auth(context)
-        return self._get_client_class()(
-            mistral_url=session_and_auth['auth'].endpoint,
-            **session_and_auth
-        )
+        if CONF.pecan.auth_enable:
+            session_and_auth = self.get_session_and_auth(context)
+
+            return self._get_client_class()(
+                mistral_url=session_and_auth['auth'].endpoint,
+                **session_and_auth)
+        else:
+            mistral_url = 'http://{}:{}/v2'.format(CONF.api.host,
+                                                   CONF.api.port)
+            return self._get_client_class()(mistral_url=mistral_url)
 
     @classmethod
     def _get_fake_client(cls):

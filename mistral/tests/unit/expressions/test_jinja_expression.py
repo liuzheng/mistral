@@ -205,7 +205,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'state': task.state,
             'state_info': task.state_info,
             'type': task.type,
-            'workflow_execution_id': task.workflow_execution_id
+            'workflow_execution_id': task.workflow_execution_id,
+            'created_at': task.created_at.isoformat(' '),
+            'updated_at': task.updated_at.isoformat(' ')
         }, result)
 
     @mock.patch('mistral.db.v2.api.get_task_executions')
@@ -232,7 +234,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'state': task.state,
             'state_info': task.state_info,
             'type': task.type,
-            'workflow_execution_id': task.workflow_execution_id
+            'workflow_execution_id': task.workflow_execution_id,
+            'created_at': task.created_at.isoformat(' '),
+            'updated_at': task.updated_at.isoformat(' ')
         }], result)
 
     @mock.patch('mistral.db.v2.api.get_task_execution')
@@ -257,7 +261,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'state': task_execution().state,
             'state_info': task_execution().state_info,
             'type': task_execution().type,
-            'workflow_execution_id': task_execution().workflow_execution_id
+            'workflow_execution_id': task_execution().workflow_execution_id,
+            'created_at': task_execution().created_at.isoformat(' '),
+            'updated_at': task_execution().updated_at.isoformat(' ')
         }, result)
 
     @mock.patch('mistral.db.v2.api.get_task_execution')
@@ -281,7 +287,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'state': task_execution().state,
             'state_info': task_execution().state_info,
             'type': task_execution().type,
-            'workflow_execution_id': task_execution().workflow_execution_id
+            'workflow_execution_id': task_execution().workflow_execution_id,
+            'created_at': task_execution().created_at.isoformat(' '),
+            'updated_at': task_execution().updated_at.isoformat(' ')
         }, result)
 
     @mock.patch('mistral.db.v2.api.get_workflow_execution')
@@ -301,7 +309,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'name': wf_ex.name,
             'spec': wf_ex.spec,
             'input': wf_ex.input,
-            'params': wf_ex.params
+            'params': wf_ex.params,
+            'created_at': wf_ex.created_at.isoformat(' '),
+            'updated_at': wf_ex.updated_at.isoformat(' ')
         }, result)
 
     @mock.patch('mistral.db.v2.api.get_workflow_execution')
@@ -321,7 +331,9 @@ class JinjaEvaluatorTest(base.BaseTest):
             'name': wf_ex.name,
             'spec': wf_ex.spec,
             'input': wf_ex.input,
-            'params': wf_ex.params
+            'params': wf_ex.params,
+            'created_at': wf_ex.created_at.isoformat(' '),
+            'updated_at': wf_ex.updated_at.isoformat(' ')
         }, result)
 
 
@@ -401,6 +413,13 @@ class InlineJinjaEvaluatorTest(base.BaseTest):
     def test_single_value_casting(self):
         self.assertEqual(3, self._evaluator.evaluate('{{ _ }}', 3))
         self.assertEqual('33', self._evaluator.evaluate('{{ _ }}{{ _ }}', 3))
+
+    def test_multiple_expressions(self):
+        context = {'dir': '/tmp',
+                   'file': 'a.txt'}
+        expected_result = '/tmp/a.txt'
+        result = self._evaluator.evaluate('{{ _.dir }}/{{ _.file }}', context)
+        self.assertEqual(expected_result, result)
 
     def test_function_string(self):
         self.assertEqual('3', self._evaluator.evaluate('{{ _|string }}', '3'))

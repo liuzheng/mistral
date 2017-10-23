@@ -35,7 +35,6 @@ from mistral.db.sqlalchemy import sqlite_lock
 from mistral.db import utils as m_dbutils
 from mistral.db.v2.sqlalchemy import filters as db_filters
 from mistral.db.v2.sqlalchemy import models
-from mistral.db.v2.sqlalchemy.models import WorkflowExecution
 from mistral import exceptions as exc
 from mistral.services import security
 from mistral import utils
@@ -1099,30 +1098,31 @@ def delete_delayed_calls(session=None, **kwargs):
 
 
 @b.session_aware()
-def get_executions_to_clean(expiration_time, limit=None,
-                            max_finished_executions=None, columns=(),
-                            session=None):
-    # Get the ids of the executions that won't be deleted.
-    # These are the not expired executions,
-    # limited by the new max_finished_executions constraint.
-    query = _get_completed_root_executions_query((WorkflowExecution.id,))
-    query = query.filter(
-        models.WorkflowExecution.updated_at >= expiration_time
-    )
-    query = query.order_by(models.WorkflowExecution.updated_at.desc())
-
-    if max_finished_executions:
-        query = query.limit(max_finished_executions)
-
-    # And take the inverse of that set.
-    inverse = _get_completed_root_executions_query(columns)
-    inverse = inverse.filter(~WorkflowExecution.id.in_(query))
-    inverse = inverse.order_by(models.WorkflowExecution.updated_at.asc())
+def get_expired_executions(expiration_time, limit=None, columns=(),
+                           session=None):
+    query = _get_completed_root_executions_query(columns)
+    query = query.filter(models.WorkflowExecution.updated_at < expiration_time)
 
     if limit:
-        inverse.limit(limit)
+        query = query.limit(limit)
 
-    return inverse.all()
+    return query.all()
+
+
+@b.session_aware()
+def get_superfluous_executions(max_finished_executions, limit=None, columns=(),
+                               session=None):
+    if not max_finished_executions:
+        return []
+
+    query = _get_completed_root_executions_query(columns)
+    query = query.order_by(models.WorkflowExecution.updated_at.desc())
+    query = query.offset(max_finished_executions)
+
+    if limit:
+        query = query.limit(limit)
+
+    return query.all()
 
 
 def _get_completed_root_executions_query(columns):
@@ -1141,20 +1141,35 @@ def _get_completed_root_executions_query(columns):
 
 
 @b.session_aware()
-def get_cron_trigger(name, session=None):
-    cron_trigger = _get_db_object_by_name(models.CronTrigger, name)
+def get_cron_trigger(identifier, session=None):
+    cron_trigger = _get_db_object_by_name_or_id(
+        models.CronTrigger,
+        identifier)
 
     if not cron_trigger:
         raise exc.DBEntityNotFoundError(
-            "Cron trigger not found [name=%s]" % name
+            "Cron trigger not found [identifier=%s]" % identifier
         )
 
     return cron_trigger
 
 
 @b.session_aware()
-def load_cron_trigger(name, session=None):
-    return _get_db_object_by_name(models.CronTrigger, name)
+def get_cron_trigger_by_id(id, session=None):
+    ctx = context.ctx()
+    cron_trigger = _get_db_object_by_id(models.CronTrigger, id,
+                                        insecure=ctx.is_admin)
+    if not cron_trigger:
+        raise exc.DBEntityNotFoundError(
+            "Cron trigger not found [id=%s]" % id
+        )
+
+    return cron_trigger
+
+
+@b.session_aware()
+def load_cron_trigger(identifier, session=None):
+    return _get_db_object_by_name_or_id(models.CronTrigger, identifier)
 
 
 @b.session_aware()
@@ -1200,8 +1215,8 @@ def create_cron_trigger(values, session=None):
 
 
 @b.session_aware()
-def update_cron_trigger(name, values, session=None, query_filter=None):
-    cron_trigger = get_cron_trigger(name)
+def update_cron_trigger(identifier, values, session=None, query_filter=None):
+    cron_trigger = get_cron_trigger(identifier)
 
     if query_filter:
         try:
@@ -1233,19 +1248,19 @@ def update_cron_trigger(name, values, session=None, query_filter=None):
 
 
 @b.session_aware()
-def create_or_update_cron_trigger(name, values, session=None):
-    cron_trigger = _get_db_object_by_name(models.CronTrigger, name)
+def create_or_update_cron_trigger(identifier, values, session=None):
+    cron_trigger = _get_db_object_by_name_or_id(models.CronTrigger, identifier)
 
     if not cron_trigger:
         return create_cron_trigger(values)
     else:
-        updated, _ = update_cron_trigger(name, values)
+        updated, _ = update_cron_trigger(identifier, values)
         return updated
 
 
 @b.session_aware()
-def delete_cron_trigger(name, session=None):
-    cron_trigger = get_cron_trigger(name)
+def delete_cron_trigger(identifier, session=None):
+    cron_trigger = get_cron_trigger(identifier)
 
     # Delete the cron trigger by ID and get the affected row count.
     table = models.CronTrigger.__table__

@@ -37,7 +37,7 @@ WF = models.WorkflowDefinition(
 WF.update({'id': '123e4567-e89b-12d3-a456-426655440000', 'name': 'my_wf'})
 
 TRIGGER = {
-    'id': '123',
+    'id': '02abb422-55ef-4bb2-8cb9-217a583a6a3f',
     'name': 'my_cron_trigger',
     'pattern': '* * * * *',
     'workflow_name': WF.name,
@@ -57,6 +57,8 @@ trigger_values['workflow_params'] = json.loads(
 
 TRIGGER_DB = models.CronTrigger()
 TRIGGER_DB.update(trigger_values)
+TRIGGER_DB_WITH_PROJECT_ID = TRIGGER_DB.get_clone()
+TRIGGER_DB_WITH_PROJECT_ID.project_id = '<default-project>'
 
 MOCK_WF = mock.MagicMock(return_value=WF)
 MOCK_TRIGGER = mock.MagicMock(return_value=TRIGGER_DB)
@@ -75,6 +77,14 @@ class TestCronTriggerController(base.APITest):
         self.assertEqual(200, resp.status_int)
         self.assertDictEqual(TRIGGER, resp.json)
 
+    @mock.patch.object(db_api, "get_cron_trigger",
+                       return_value=TRIGGER_DB_WITH_PROJECT_ID)
+    def test_get_within_project_id(self, mock_get):
+        resp = self.app.get('/v2/cron_triggers/my_cron_trigger')
+
+        self.assertEqual(200, resp.status_int)
+        self.assertTrue('project_id' in resp.json)
+
     @mock.patch.object(db_api, "get_cron_trigger", MOCK_NOT_FOUND)
     def test_get_not_found(self):
         resp = self.app.get(
@@ -83,6 +93,13 @@ class TestCronTriggerController(base.APITest):
         )
 
         self.assertEqual(404, resp.status_int)
+
+    @mock.patch.object(db_api, "get_cron_trigger", MOCK_TRIGGER)
+    def test_get_by_id(self):
+        resp = self.app.get(
+            "/v2/cron_triggers/02abb422-55ef-4bb2-8cb9-217a583a6a3f")
+        self.assertEqual(200, resp.status_int)
+        self.assertDictEqual(TRIGGER, resp.json)
 
     @mock.patch.object(db_api, "get_workflow_definition", MOCK_WF)
     @mock.patch.object(db_api, "create_cron_trigger")
@@ -129,6 +146,16 @@ class TestCronTriggerController(base.APITest):
     @mock.patch.object(security, "delete_trust")
     def test_delete(self, delete_trust):
         resp = self.app.delete('/v2/cron_triggers/my_cron_trigger')
+
+        self.assertEqual(1, delete_trust.call_count)
+        self.assertEqual(204, resp.status_int)
+
+    @mock.patch.object(db_api, "get_cron_trigger", MOCK_TRIGGER)
+    @mock.patch.object(db_api, "delete_cron_trigger", MOCK_DELETE)
+    @mock.patch.object(security, "delete_trust")
+    def test_delete_by_id(self, delete_trust):
+        resp = self.app.delete(
+            '/v2/cron_triggers/02abb422-55ef-4bb2-8cb9-217a583a6a3f')
 
         self.assertEqual(1, delete_trust.call_count)
         self.assertEqual(204, resp.status_int)

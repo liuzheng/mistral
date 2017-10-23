@@ -248,7 +248,11 @@ class PythonAction(Action):
             action_ex_id=action_ex_id
         )
 
-        action_queue.schedule(self.action_ex, self.action_def, target)
+        action_queue.schedule_run_action(
+            self.action_ex,
+            self.action_def,
+            target
+        )
 
     @profiler.trace('action-run', hide_args=True)
     def run(self, input_dict, target, index=0, desc='', save=True,
@@ -534,7 +538,13 @@ class WorkflowAction(Action):
             wf_def.updated_at
         )
 
+        # If the parent has a root_execution_id, it must be a sub-workflow. So
+        # we should propogate that ID down. Otherwise the parent must be the
+        # root execution and we should use the parents ID.
+        root_execution_id = parent_wf_ex.root_execution_id or parent_wf_ex.id
+
         wf_params = {
+            'root_execution_id': root_execution_id,
             'task_execution_id': self.task_ex.id,
             'index': index,
             'namespace': parent_wf_ex.params['namespace']

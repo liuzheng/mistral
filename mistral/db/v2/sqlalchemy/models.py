@@ -317,6 +317,14 @@ sa.Index(
     'task_execution_id'
 )
 
+# Many-to-one for 'WorkflowExecution' and 'WorkflowExecution'
+
+WorkflowExecution.root_execution_id = sa.Column(
+    sa.String(36),
+    sa.ForeignKey(WorkflowExecution.id, ondelete='SET NULL'),
+    nullable=True
+)
+
 # Many-to-one for 'TaskExecution' and 'WorkflowExecution'.
 
 TaskExecution.workflow_execution_id = sa.Column(
@@ -335,6 +343,11 @@ WorkflowExecution.task_executions = relationship(
 sa.Index(
     '%s_workflow_execution_id' % TaskExecution.__tablename__,
     TaskExecution.workflow_execution_id
+)
+
+sa.Index(
+    '%s_workflow_execution_id_name' % TaskExecution.__tablename__,
+    TaskExecution.workflow_execution_id, TaskExecution.name
 )
 
 
