@@ -30,6 +30,8 @@ machine:
     BUILD_DOCKER: 0
     DEPLOY_DOCKER: 0
     DEPLOY_PACKAGES: 1
+  ruby:
+    version: ruby-2.0.0-p645
   pre:
     - mkdir -p ~/packages
     # Need latest Docker version for some features to work (CircleCI by default works with outdated version)
