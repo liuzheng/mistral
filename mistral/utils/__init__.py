@@ -18,7 +18,6 @@ import contextlib
 import datetime
 import functools
 import json
-import logging
 import os
 from os import path
 import shutil
@@ -30,13 +29,13 @@ import threading
 import eventlet
 from eventlet import corolocal
 from oslo_concurrency import processutils
+from oslo_log import log as logging
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 import pkg_resources as pkg
 import random
 
 from mistral import exceptions as exc
-from mistral import version
 
 
 # Thread local storage.
@@ -176,10 +175,7 @@ def update_dict(left, right):
 
 
 def get_file_list(directory):
-    base_path = pkg.resource_filename(
-        version.version_info.package,
-        directory
-    )
+    base_path = pkg.resource_filename("mistral", directory)
 
     return [path.join(base_path, f) for f in os.listdir(base_path)
             if path.isfile(path.join(base_path, f))]
@@ -311,9 +307,11 @@ def cut_by_kb(data, kilobytes):
     if kilobytes <= 0:
         return cut(data)
 
-    bytes_per_char = sys.getsizeof('s') - sys.getsizeof('')
-    length = int(kilobytes * 1024 / bytes_per_char)
+    length = get_number_of_chars_from_kilobytes(kilobytes)
+    return cut(data, length)
 
+
+def cut_by_char(data, length):
     return cut(data, length)
 
 
@@ -363,6 +361,12 @@ class NotDefined(object):
     """
 
     pass
+
+
+def get_number_of_chars_from_kilobytes(kilobytes):
+    bytes_per_char = sys.getsizeof('s') - sys.getsizeof('')
+    total_number_of_chars = int(kilobytes * 1024 / bytes_per_char)
+    return total_number_of_chars
 
 
 def get_dict_from_string(string, delimiter=','):

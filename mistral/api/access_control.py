@@ -19,7 +19,7 @@ from oslo_config import cfg
 from oslo_policy import policy
 
 from mistral import exceptions as exc
-
+from mistral import policies
 
 _ENFORCER = None
 
@@ -61,11 +61,6 @@ def enforce(action, context, target=None, do_raise=True,
              do_raise is False.
     """
 
-    if cfg.CONF.auth_type != 'keystone':
-        # Policy enforcement is supported now only with Keystone
-        # authentication.
-        return
-
     target_obj = {
         'project_id': context.project_id,
         'user_id': context.user_id,
@@ -73,14 +68,14 @@ def enforce(action, context, target=None, do_raise=True,
     target_obj.update(target or {})
 
     policy_context = context.to_policy_values()
-    # Because policy.json example in Mistral repo still uses the rule
-    # 'is_admin: True', we insert 'is_admin' key to the default policy
-    # values.
+    # Because policy.json or policy.yaml example in Mistral repo still uses
+    # the rule 'is_admin: True', we insert 'is_admin' key to the default
+    # policy values.
     policy_context['is_admin'] = context.is_admin
 
     _ensure_enforcer_initialization()
 
-    return _ENFORCER.enforce(
+    return _ENFORCER.authorize(
         action,
         target_obj,
         policy_context,
@@ -93,6 +88,7 @@ def _ensure_enforcer_initialization():
     global _ENFORCER
     if not _ENFORCER:
         _ENFORCER = policy.Enforcer(cfg.CONF)
+        _ENFORCER.register_defaults(policies.list_rules())
         _ENFORCER.load_rules()
 
 

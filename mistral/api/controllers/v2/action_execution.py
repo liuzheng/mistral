@@ -16,6 +16,8 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 from pecan import rest
+import sqlalchemy as sa
+import tenacity
 from wsme import types as wtypes
 import wsmeext.pecan as wsme_pecan
 
@@ -49,6 +51,12 @@ def _load_deferred_output_field(action_ex):
     hasattr(action_ex, 'output')
 
 
+# Use retries to prevent possible failures.
+@tenacity.retry(
+    retry=tenacity.retry_if_exception_type(sa.exc.OperationalError),
+    stop=tenacity.stop_after_attempt(10),
+    wait=tenacity.wait_incrementing(increment=100)  # 0.1 seconds
+)
 def _get_action_execution(id):
     with db_api.transaction():
         return _get_action_execution_resource(db_api.get_action_execution(id))
@@ -61,7 +69,6 @@ def _get_action_execution_resource(action_ex):
 
 
 def _get_action_execution_resource_for_list(action_ex):
-
     # TODO(nmakhotkin): Get rid of using dicts for constructing resources.
     # TODO(nmakhotkin): Use db_model for this instead.
     res = resources.ActionExecution.from_db_model(action_ex)
@@ -130,7 +137,7 @@ class ActionExecutionsController(rest.RestController):
         """
         acl.enforce('action_executions:get', context.ctx())
 
-        LOG.info("Fetch action_execution [id=%s]", id)
+        LOG.debug("Fetch action_execution [id=%s]", id)
 
         return _get_action_execution(id)
 
@@ -144,7 +151,7 @@ class ActionExecutionsController(rest.RestController):
         """
         acl.enforce('action_executions:create', context.ctx())
 
-        LOG.info(
+        LOG.debug(
             "Create action_execution [action_execution=%s]",
             action_ex
         )
@@ -182,7 +189,7 @@ class ActionExecutionsController(rest.RestController):
         """
         acl.enforce('action_executions:update', context.ctx())
 
-        LOG.info(
+        LOG.debug(
             "Update action_execution [id=%s, action_execution=%s]",
             id,
             action_ex
@@ -292,7 +299,7 @@ class ActionExecutionsController(rest.RestController):
             description=description
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch action_executions. marker=%s, limit=%s, "
             "sort_keys=%s, sort_dirs=%s, filters=%s",
             marker,
@@ -321,7 +328,7 @@ class ActionExecutionsController(rest.RestController):
         """
         acl.enforce('action_executions:delete', context.ctx())
 
-        LOG.info("Delete action_execution [id=%s]", id)
+        LOG.debug("Delete action_execution [id=%s]", id)
 
         if not cfg.CONF.api.allow_action_execution_deletion:
             raise exc.NotAllowedException("Action execution deletion is not "
@@ -421,7 +428,7 @@ class TasksActionExecutionController(rest.RestController):
             description=description
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch action_executions. marker=%s, limit=%s, "
             "sort_keys=%s, sort_dirs=%s, filters=%s",
             marker,
@@ -451,6 +458,6 @@ class TasksActionExecutionController(rest.RestController):
         """
         acl.enforce('action_executions:get', context.ctx())
 
-        LOG.info("Fetch action_execution [id=%s]", action_ex_id)
+        LOG.debug("Fetch action_execution [id=%s]", action_ex_id)
 
         return _get_action_execution(action_ex_id)

@@ -39,9 +39,11 @@ class EventTriggersController(rest.RestController):
         """Returns the specified event_trigger."""
         acl.enforce('event_triggers:get', auth_ctx.ctx())
 
-        LOG.info('Fetch event trigger [id=%s]', id)
+        LOG.debug('Fetch event trigger [id=%s]', id)
 
-        db_model = db_api.get_event_trigger(id)
+        # Use retries to prevent possible failures.
+        r = rest_utils.create_db_retry_object()
+        db_model = r.call(db_api.get_event_trigger, id)
 
         return resources.EventTrigger.from_db_model(db_model)
 
@@ -64,7 +66,7 @@ class EventTriggersController(rest.RestController):
         if values.get('scope') == 'public':
             acl.enforce('event_triggers:create:public', auth_ctx.ctx())
 
-        LOG.info('Create event trigger: %s', values)
+        LOG.debug('Create event trigger: %s', values)
 
         db_model = triggers.create_event_trigger(
             values.get('name', ''),
@@ -100,10 +102,11 @@ class EventTriggersController(rest.RestController):
                     UPDATE_NOT_ALLOWED
                 )
 
-        LOG.info('Update event trigger: [id=%s, values=%s]', id, values)
+        LOG.debug('Update event trigger: [id=%s, values=%s]', id, values)
 
         with db_api.transaction():
-            db_api.ensure_event_trigger_exists(id)
+            # ensure that event trigger exists
+            db_api.get_event_trigger(id)
 
             db_model = triggers.update_event_trigger(id, values)
 
@@ -115,7 +118,7 @@ class EventTriggersController(rest.RestController):
         """Delete event trigger."""
         acl.enforce('event_triggers:delete', auth_ctx.ctx())
 
-        LOG.info("Delete event trigger [id=%s]", id)
+        LOG.debug("Delete event trigger [id=%s]", id)
 
         with db_api.transaction():
             event_trigger = db_api.get_event_trigger(id)
@@ -134,7 +137,7 @@ class EventTriggersController(rest.RestController):
         if all_projects:
             acl.enforce('event_triggers:list:all_projects', auth_ctx.ctx())
 
-        LOG.info(
+        LOG.debug(
             "Fetch event triggers. marker=%s, limit=%s, sort_keys=%s, "
             "sort_dirs=%s, fields=%s, all_projects=%s, filters=%s", marker,
             limit, sort_keys, sort_dirs, fields, all_projects, filters

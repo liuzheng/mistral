@@ -52,7 +52,9 @@ etc/mistral.conf.sample
 releasenotes/build
 
 # Files created by doc build
+doc/build/
 doc/source/api
+doc/source/_static/
 
 # Files created by API build
 api-ref/build/

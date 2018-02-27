@@ -53,8 +53,8 @@ def end_tx():
 
 
 @contextlib.contextmanager
-def transaction():
-    with IMPL.transaction():
+def transaction(read_only=False):
+    with IMPL.transaction(read_only):
         yield
 
 
@@ -174,7 +174,7 @@ def load_action_definition(name):
     return IMPL.load_action_definition(name)
 
 
-def get_action_definitions(limit=None, marker=None, sort_keys=['name'],
+def get_action_definitions(limit=None, marker=None, sort_keys=None,
                            sort_dirs=None, **kwargs):
     return IMPL.get_action_definitions(
         limit=limit,
@@ -220,10 +220,6 @@ def get_action_executions(**kwargs):
     return IMPL.get_action_executions(**kwargs)
 
 
-def ensure_action_execution_exists(id):
-    return IMPL.ensure_action_execution_exists(id)
-
-
 def create_action_execution(values):
     return IMPL.create_action_execution(values)
 
@@ -255,7 +251,7 @@ def load_workflow_execution(name):
     return IMPL.load_workflow_execution(name)
 
 
-def get_workflow_executions(limit=None, marker=None, sort_keys=['created_at'],
+def get_workflow_executions(limit=None, marker=None, sort_keys=None,
                             sort_dirs=None, **kwargs):
     return IMPL.get_workflow_executions(
         limit=limit,
@@ -264,10 +260,6 @@ def get_workflow_executions(limit=None, marker=None, sort_keys=['created_at'],
         sort_dirs=sort_dirs,
         **kwargs
     )
-
-
-def ensure_workflow_execution_exists(id):
-    return IMPL.ensure_workflow_execution_exists(id)
 
 
 def create_workflow_execution(values):
@@ -290,6 +282,10 @@ def delete_workflow_executions(**kwargs):
     IMPL.delete_workflow_executions(**kwargs)
 
 
+def update_workflow_execution_state(**kwargs):
+    return IMPL.update_workflow_execution_state(**kwargs)
+
+
 # Tasks executions.
 
 def get_task_execution(id):
@@ -301,7 +297,7 @@ def load_task_execution(id):
     return IMPL.load_task_execution(id)
 
 
-def get_task_executions(limit=None, marker=None, sort_keys=['created_at'],
+def get_task_executions(limit=None, marker=None, sort_keys=None,
                         sort_dirs=None, **kwargs):
     return IMPL.get_task_executions(
         limit=limit,
@@ -344,10 +340,14 @@ def delete_task_executions(**kwargs):
     return IMPL.delete_task_executions(**kwargs)
 
 
+def update_task_execution_state(**kwargs):
+    return IMPL.update_task_execution_state(**kwargs)
+
+
 # Delayed calls.
 
-def get_delayed_calls_to_start(time):
-    return IMPL.get_delayed_calls_to_start(time)
+def get_delayed_calls_to_start(time, batch_size=None):
+    return IMPL.get_delayed_calls_to_start(time, batch_size)
 
 
 def create_delayed_call(values):
@@ -447,7 +447,7 @@ def load_environment(name):
     return IMPL.load_environment(name)
 
 
-def get_environments(limit=None, marker=None, sort_keys=['name'],
+def get_environments(limit=None, marker=None, sort_keys=None,
                      sort_dirs=None, **kwargs):
 
     return IMPL.get_environments(
@@ -548,10 +548,6 @@ def delete_event_trigger(id):
 
 def delete_event_triggers(**kwargs):
     return IMPL.delete_event_triggers(**kwargs)
-
-
-def ensure_event_trigger_exists(id):
-    return IMPL.ensure_event_trigger_exists(id)
 
 
 # Locks.

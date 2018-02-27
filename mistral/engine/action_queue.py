@@ -57,7 +57,7 @@ def _process_queue(queue):
 
     for operation, args in queue:
         if operation == _RUN_ACTION:
-            action_ex, action_def, target = args
+            action_ex, action_def, target, execution_context, timeout = args
 
             executor.run_action(
                 action_ex.id,
@@ -65,7 +65,9 @@ def _process_queue(queue):
                 action_def.attributes or {},
                 action_ex.input,
                 action_ex.runtime_context.get('safe_rerun', False),
-                target=target
+                execution_context,
+                target=target,
+                timeout=timeout
             )
         elif operation == _ON_ACTION_COMPLETE:
             action_ex_id, result, wf_action = args
@@ -119,8 +121,10 @@ def process(func):
     return decorate
 
 
-def schedule_run_action(action_ex, action_def, target):
-    _get_queue().append((_RUN_ACTION, (action_ex, action_def, target)))
+def schedule_run_action(action_ex, action_def, target, execution_context,
+                        timeout):
+    args = (action_ex, action_def, target, execution_context, timeout)
+    _get_queue().append((_RUN_ACTION, args))
 
 
 def schedule_on_action_complete(action_ex_id, result, wf_action=False):

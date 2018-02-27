@@ -2,6 +2,7 @@
 # Copyright 2015 - StackStorm, Inc.
 # Copyright 2015 Huawei Technologies Co., Ltd.
 # Copyright 2016 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -17,6 +18,8 @@
 
 from oslo_log import log as logging
 from pecan import rest
+import sqlalchemy as sa
+import tenacity
 from wsme import types as wtypes
 import wsmeext.pecan as wsme_pecan
 
@@ -30,6 +33,7 @@ from mistral import exceptions as exc
 from mistral.rpc import clients as rpc
 from mistral.services import workflows as wf_service
 from mistral.utils import filter_utils
+from mistral.utils import merge_dicts
 from mistral.utils import rest_utils
 from mistral.workflow import states
 
@@ -47,12 +51,35 @@ STATE_TYPES = wtypes.Enum(
 )
 
 
-def _get_execution_resource(wf_ex):
-    # We need to refer to this lazy-load field explicitly in
-    # order to make sure that it is correctly loaded.
-    hasattr(wf_ex, 'output')
+def _load_deferred_output_field(ex):
+    if ex:
+        # We need to refer to this lazy-load field explicitly in
+        # order to make sure that it is correctly loaded.
+        hasattr(ex, 'output')
+
+    return ex
+
+
+def _get_workflow_execution_resource(wf_ex):
+    _load_deferred_output_field(wf_ex)
 
     return resources.Execution.from_db_model(wf_ex)
+
+
+# Use retries to prevent possible failures.
+@tenacity.retry(
+    retry=tenacity.retry_if_exception_type(sa.exc.OperationalError),
+    stop=tenacity.stop_after_attempt(10),
+    wait=tenacity.wait_incrementing(increment=100)  # 0.1 seconds
+)
+def _get_workflow_execution(id, must_exist=True):
+    with db_api.transaction():
+        if must_exist:
+            wf_ex = db_api.get_workflow_execution(id)
+        else:
+            wf_ex = db_api.load_workflow_execution(id)
+
+        return _load_deferred_output_field(wf_ex)
 
 
 # TODO(rakhmerov): Make sure to make all needed renaming on public API.
@@ -70,15 +97,9 @@ class ExecutionsController(rest.RestController):
         """
         acl.enforce("executions:get", context.ctx())
 
-        LOG.info("Fetch execution [id=%s]", id)
+        LOG.debug("Fetch execution [id=%s]", id)
 
-        with db_api.transaction():
-            wf_ex = db_api.get_workflow_execution(id)
-
-            # If a single object is requested we need to explicitly load
-            # 'output' attribute. We don't do this for collections to reduce
-            # amount of DB queries and network traffic.
-            hasattr(wf_ex, 'output')
+        wf_ex = _get_workflow_execution(id)
 
         return resources.Execution.from_db_model(wf_ex)
 
@@ -96,10 +117,11 @@ class ExecutionsController(rest.RestController):
         """
         acl.enforce('executions:update', context.ctx())
 
-        LOG.info('Update execution [id=%s, execution=%s]', id, wf_ex)
+        LOG.debug('Update execution [id=%s, execution=%s]', id, wf_ex)
 
         with db_api.transaction():
-            db_api.ensure_workflow_execution_exists(id)
+            # ensure that workflow execution exists
+            db_api.get_workflow_execution(id)
 
             delta = {}
 
@@ -194,24 +216,51 @@ class ExecutionsController(rest.RestController):
         """
         acl.enforce('executions:create', context.ctx())
 
-        LOG.info("Create execution [execution=%s]", wf_ex)
+        LOG.debug("Create execution [execution=%s]", wf_ex)
 
-        engine = rpc.get_engine_client()
         exec_dict = wf_ex.to_dict()
 
-        if not (exec_dict.get('workflow_id')
-                or exec_dict.get('workflow_name')):
+        exec_id = exec_dict.get('id')
+
+        source_execution_id = exec_dict.get('source_execution_id')
+
+        source_exec_dict = None
+
+        if exec_id:
+            # If ID is present we need to check if such execution exists.
+            # If yes, the method just returns the object. If not, the ID
+            # will be used to create a new execution.
+            wf_ex = _get_workflow_execution(exec_id, must_exist=False)
+
+            if wf_ex:
+                return resources.Execution.from_db_model(wf_ex)
+
+        if source_execution_id:
+            # If source execution is present we will perform a lookup for
+            # previous workflow execution model and the information to start
+            # a new workflow based on that information.
+            source_exec_dict = db_api.get_workflow_execution(
+                source_execution_id).to_dict()
+
+        result_exec_dict = merge_dicts(source_exec_dict, exec_dict)
+
+        if not (result_exec_dict.get('workflow_id') or
+                result_exec_dict.get('workflow_name')):
             raise exc.WorkflowException(
                 "Workflow ID or workflow name must be provided. Workflow ID is"
                 " recommended."
             )
 
+        engine = rpc.get_engine_client()
+
         result = engine.start_workflow(
-            exec_dict.get('workflow_id', exec_dict.get('workflow_name')),
-            exec_dict.get('workflow_namespace', ''),
-            exec_dict.get('input'),
-            exec_dict.get('description', ''),
-            **exec_dict.get('params') or {}
+            result_exec_dict.get('workflow_id',
+                                 result_exec_dict.get('workflow_name')),
+            result_exec_dict.get('workflow_namespace', ''),
+            exec_id,
+            result_exec_dict.get('input'),
+            description=result_exec_dict.get('description', ''),
+            **result_exec_dict.get('params', {})
         )
 
         return resources.Execution.from_dict(result)
@@ -225,7 +274,7 @@ class ExecutionsController(rest.RestController):
         """
         acl.enforce('executions:delete', context.ctx())
 
-        LOG.info("Delete execution [id=%s]", id)
+        LOG.debug("Delete execution [id=%s]", id)
 
         return db_api.delete_workflow_execution(id)
 
@@ -233,15 +282,16 @@ class ExecutionsController(rest.RestController):
     @wsme_pecan.wsexpose(resources.Executions, types.uuid, int,
                          types.uniquelist, types.list, types.uniquelist,
                          wtypes.text, types.uuid, wtypes.text, types.jsontype,
-                         types.uuid, STATE_TYPES, wtypes.text, types.jsontype,
-                         types.jsontype, wtypes.text, wtypes.text, bool,
-                         types.uuid, bool)
+                         types.uuid, types.uuid, STATE_TYPES, wtypes.text,
+                         types.jsontype, types.jsontype, wtypes.text,
+                         wtypes.text, bool, types.uuid, bool)
     def get_all(self, marker=None, limit=None, sort_keys='created_at',
                 sort_dirs='asc', fields='', workflow_name=None,
                 workflow_id=None, description=None, params=None,
-                task_execution_id=None, state=None, state_info=None,
-                input=None, output=None, created_at=None, updated_at=None,
-                include_output=None, project_id=None, all_projects=False):
+                task_execution_id=None, root_execution_id=None, state=None,
+                state_info=None, input=None, output=None, created_at=None,
+                updated_at=None, include_output=None, project_id=None,
+                all_projects=False):
         """Return all Executions.
 
         :param marker: Optional. Pagination marker for large data sets.
@@ -267,6 +317,8 @@ class ExecutionsController(rest.RestController):
         :param params: Optional. Keep only resources with specific parameters.
         :param task_execution_id: Optional. Keep only resources with a
                                   specific task execution ID.
+        :param root_execution_id: Optional. Keep only resources with a
+                                  specific root execution ID.
         :param state: Optional. Keep only resources with a specific state.
         :param state_info: Optional. Keep only resources with specific
                            state information.
@@ -300,17 +352,18 @@ class ExecutionsController(rest.RestController):
             output=output,
             updated_at=updated_at,
             description=description,
-            project_id=project_id
+            project_id=project_id,
+            root_execution_id=root_execution_id,
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch executions. marker=%s, limit=%s, sort_keys=%s, "
             "sort_dirs=%s, filters=%s, all_projects=%s", marker, limit,
             sort_keys, sort_dirs, filters, all_projects
         )
 
         if include_output:
-            resource_function = _get_execution_resource
+            resource_function = _get_workflow_execution_resource
         else:
             resource_function = None
 

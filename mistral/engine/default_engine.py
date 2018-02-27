@@ -1,6 +1,7 @@
 # Copyright 2013 - Mirantis, Inc.
 # Copyright 2015 - StackStorm, Inc.
 # Copyright 2016 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -14,6 +15,7 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
+from oslo_config import cfg
 from osprofiler import profiler
 
 from mistral.db import utils as db_utils
@@ -34,26 +36,43 @@ from mistral.workflow import states
 
 
 class DefaultEngine(base.Engine):
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     @profiler.trace('engine-start-workflow', hide_args=True)
-    def start_workflow(self, wf_identifier, wf_namespace='', wf_input=None,
-                       description='', **params):
+    def start_workflow(self, wf_identifier, wf_namespace='', wf_ex_id=None,
+                       wf_input=None, description='', **params):
         if wf_namespace:
             params['namespace'] = wf_namespace
 
-        with db_api.transaction():
-            wf_ex = wf_handler.start_workflow(
-                wf_identifier,
-                wf_namespace,
-                wf_input or {},
-                description,
-                params
-            )
+        if cfg.CONF.notifier.notify:
+            if 'notify' not in params or not params['notify']:
+                params['notify'] = []
 
-            return wf_ex.get_clone()
+            params['notify'].extend(cfg.CONF.notifier.notify)
 
-    @db_utils.retry_on_deadlock
+        try:
+            with db_api.transaction():
+                wf_ex = wf_handler.start_workflow(
+                    wf_identifier,
+                    wf_namespace,
+                    wf_ex_id,
+                    wf_input or {},
+                    description,
+                    params
+                )
+
+                return wf_ex.get_clone()
+
+        except exceptions.DBDuplicateEntryError:
+            # NOTE(akovi): the workflow execution with a provided
+            # wf_ex_id may already exist. In this case, simply
+            # return the existing entity.
+            with db_api.transaction():
+                wf_ex = db_api.get_workflow_execution(wf_ex_id)
+
+                return wf_ex.get_clone()
+
+    @db_utils.retry_on_db_error
     @action_queue.process
     def start_action(self, action_name, action_input,
                      description=None, **params):
@@ -65,6 +84,7 @@ class DefaultEngine(base.Engine):
             sync = params.get('run_sync')
             save = params.get('save_result')
             target = params.get('target')
+            timeout = params.get('timeout')
 
             is_action_sync = action.is_sync(action_input)
 
@@ -73,17 +93,18 @@ class DefaultEngine(base.Engine):
                     "Action does not support synchronous execution.")
 
             if not sync and (save or not is_action_sync):
-                action.schedule(action_input, target)
+                action.schedule(action_input, target, timeout=timeout)
 
                 return action.action_ex.get_clone()
 
-            output = action.run(action_input, target, save=False)
+            output = action.run(action_input, target, save=False,
+                                timeout=timeout)
 
             state = states.SUCCESS if output.is_success() else states.ERROR
 
             if not save:
                 # Action execution is not created but we need to return similar
-                # object to a client anyway.
+                # object to the client anyway.
                 return db_models.ActionExecution(
                     name=action_name,
                     description=description,
@@ -105,7 +126,7 @@ class DefaultEngine(base.Engine):
 
             return db_api.create_action_execution(values)
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     @profiler.trace('engine-on-action-complete', hide_args=True)
     def on_action_complete(self, action_ex_id, result, wf_action=False,
@@ -120,7 +141,7 @@ class DefaultEngine(base.Engine):
 
             return action_ex.get_clone()
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     @profiler.trace('engine-on-action-update', hide_args=True)
     def on_action_update(self, action_ex_id, state, wf_action=False,
@@ -135,7 +156,7 @@ class DefaultEngine(base.Engine):
 
             return action_ex.get_clone()
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     def pause_workflow(self, wf_ex_id):
         with db_api.transaction():
@@ -145,7 +166,7 @@ class DefaultEngine(base.Engine):
 
             return wf_ex.get_clone()
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     def rerun_workflow(self, task_ex_id, reset=True, env=None):
         with db_api.transaction():
@@ -157,7 +178,7 @@ class DefaultEngine(base.Engine):
 
             return wf_ex.get_clone()
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     def resume_workflow(self, wf_ex_id, env=None):
         with db_api.transaction():
@@ -167,7 +188,7 @@ class DefaultEngine(base.Engine):
 
             return wf_ex.get_clone()
 
-    @db_utils.retry_on_deadlock
+    @db_utils.retry_on_db_error
     @action_queue.process
     def stop_workflow(self, wf_ex_id, state, message=None):
         with db_api.transaction():

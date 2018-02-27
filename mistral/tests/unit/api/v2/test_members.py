@@ -17,6 +17,7 @@ import copy
 import mock
 from oslo_config import cfg
 from oslo_utils import uuidutils
+import sqlalchemy as sa
 
 from mistral.db.v2 import api as db_api
 from mistral.services import security
@@ -50,6 +51,8 @@ class TestMembersController(base.APITest):
     def setUp(self):
         super(TestMembersController, self).setUp()
 
+        self.override_config('auth_enable', True, group='pecan')
+
         wf = db_api.create_workflow_definition(WF_DEFINITION)
 
         global MEMBER_URL, WORKFLOW_MEMBER_ACCEPTED
@@ -64,7 +67,7 @@ class TestMembersController(base.APITest):
         cfg.CONF.set_default('auth_enable', True, group='pecan')
 
     def test_membership_api_without_auth(self):
-        cfg.CONF.set_default('auth_enable', False, group='pecan')
+        self.override_config('auth_enable', False, group='pecan')
 
         resp = self.app.get(MEMBER_URL, expect_errors=True)
 
@@ -151,6 +154,30 @@ class TestMembersController(base.APITest):
     @mock.patch('mistral.context.AuthHook.before')
     def test_get_other_memberships(self, auth_mock):
         resp = self.app.post_json(MEMBER_URL, {'member_id': '11-22-33'})
+
+        self.assertEqual(201, resp.status_int)
+
+        # Using mock to switch to another tenant.
+        get_mock = mock.MagicMock(return_value='other_tenant')
+
+        with mock.patch(GET_PROJECT_PATH, get_mock):
+            resp = self.app.get(MEMBER_URL)
+
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual(0, len(resp.json['members']))
+
+    @mock.patch('mistral.context.AuthHook.before')
+    @mock.patch.object(db_api, 'get_resource_member')
+    def test_get_operational_error(self, mocked_get, auth_mock):
+        member_data = {'member_id': '11-22-33'}
+
+        mocked_get.side_effect = [
+            # Emulating DB OperationalError
+            sa.exc.OperationalError('Mock', 'mock', 'mock'),
+            member_data  # Successful run
+        ]
+
+        resp = self.app.post_json(MEMBER_URL, member_data)
 
         self.assertEqual(201, resp.status_int)
 

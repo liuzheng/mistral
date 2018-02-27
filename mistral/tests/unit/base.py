@@ -101,6 +101,7 @@ class FakeHTTPResponse(object):
 class BaseTest(base.BaseTestCase):
     def setUp(self):
         super(BaseTest, self).setUp()
+
         self.addCleanup(spec_parser.clear_caches)
 
     def register_action_class(self, name, cls, attributes=None, desc=None):
@@ -181,7 +182,7 @@ class BaseTest(base.BaseTestCase):
 
         self.fail(self._formatMessage(msg, standardMsg))
 
-    def _await(self, predicate, delay=1, timeout=60):
+    def _await(self, predicate, delay=1, timeout=60, fail_message="no detail"):
         """Awaits for predicate function to evaluate to True.
 
         If within a configured timeout predicate function hasn't evaluated
@@ -190,6 +191,7 @@ class BaseTest(base.BaseTestCase):
         :param delay: Delay in seconds between predicate function calls.
         :param timeout: Maximum amount of time to wait for predication
             function to evaluate to True.
+        :param fail_message: explains what was expected
         :return:
         """
         end_time = time.time() + timeout
@@ -199,7 +201,9 @@ class BaseTest(base.BaseTestCase):
                 break
 
             if time.time() + delay > end_time:
-                raise AssertionError("Failed to wait for expected result.")
+                raise AssertionError(
+                    "Failed to wait for expected result: " + fail_message
+                )
 
             time.sleep(delay)
 
@@ -209,6 +213,7 @@ class BaseTest(base.BaseTestCase):
     def override_config(self, name, override, group=None):
         """Cleanly override CONF variables."""
         cfg.CONF.set_override(name, override, group)
+
         self.addCleanup(cfg.CONF.clear_override, name, group)
 
 

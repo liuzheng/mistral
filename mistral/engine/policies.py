@@ -28,6 +28,9 @@ import six
 
 _CONTINUE_TASK_PATH = 'mistral.engine.policies._continue_task'
 _COMPLETE_TASK_PATH = 'mistral.engine.policies._complete_task'
+_FAIL_IF_INCOMPLETE_TASK_PATH = (
+    'mistral.engine.policies._fail_task_if_incomplete'
+)
 
 
 def _log_task_delay(task_ex, delay_sec):
@@ -80,7 +83,7 @@ def build_wait_before_policy(policies_spec):
 
     wait_before = policies_spec.get_wait_before()
 
-    if (isinstance(wait_before, six.string_types) or wait_before > 0):
+    if isinstance(wait_before, six.string_types) or wait_before > 0:
         return WaitBeforePolicy(wait_before)
     else:
         return None
@@ -92,7 +95,7 @@ def build_wait_after_policy(policies_spec):
 
     wait_after = policies_spec.get_wait_after()
 
-    if (isinstance(wait_after, six.string_types) or wait_after > 0):
+    if isinstance(wait_after, six.string_types) or wait_after > 0:
         return WaitAfterPolicy(wait_after)
     else:
         return None
@@ -121,7 +124,7 @@ def build_timeout_policy(policies_spec):
 
     timeout_policy = policies_spec.get_timeout()
 
-    if (isinstance(timeout_policy, six.string_types) or timeout_policy > 0):
+    if isinstance(timeout_policy, six.string_types) or timeout_policy > 0:
         return TimeoutPolicy(timeout_policy)
     else:
         return None
@@ -160,7 +163,10 @@ def _ensure_context_has_key(runtime_context, key):
 class WaitBeforePolicy(base.TaskPolicy):
     _schema = {
         "properties": {
-            "delay": {"type": "integer"}
+            "delay": {
+                "type": "integer",
+                "minimum": 0
+            }
         }
     }
 
@@ -169,6 +175,10 @@ class WaitBeforePolicy(base.TaskPolicy):
 
     def before_task_start(self, task_ex, task_spec):
         super(WaitBeforePolicy, self).before_task_start(task_ex, task_spec)
+
+        # No need to wait for a task if delay is 0
+        if self.delay == 0:
+            return
 
         context_key = 'wait_before_policy'
 
@@ -211,7 +221,10 @@ class WaitBeforePolicy(base.TaskPolicy):
 class WaitAfterPolicy(base.TaskPolicy):
     _schema = {
         "properties": {
-            "delay": {"type": "integer"}
+            "delay": {
+                "type": "integer",
+                "minimum": 0
+            }
         }
     }
 
@@ -220,6 +233,10 @@ class WaitAfterPolicy(base.TaskPolicy):
 
     def after_task_complete(self, task_ex, task_spec):
         super(WaitAfterPolicy, self).after_task_complete(task_ex, task_spec)
+
+        # No need to postpone a task if delay is 0
+        if self.delay == 0:
+            return
 
         context_key = 'wait_after_policy'
 
@@ -265,15 +282,21 @@ class WaitAfterPolicy(base.TaskPolicy):
 class RetryPolicy(base.TaskPolicy):
     _schema = {
         "properties": {
-            "delay": {"type": "integer"},
-            "count": {"type": "integer"}
+            "delay": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "count": {
+                "type": "integer",
+                "minimum": 0
+            },
         }
     }
 
     def __init__(self, count, delay, break_on, continue_on):
         self.count = count
         self.delay = delay
-        self.break_on = break_on
+        self._break_on_clause = break_on
         self._continue_on_clause = continue_on
 
     def after_task_complete(self, task_ex, task_spec):
@@ -293,6 +316,10 @@ class RetryPolicy(base.TaskPolicy):
         Iterations complete therefore state = #{state}, current:count = 4.
         """
         super(RetryPolicy, self).after_task_complete(task_ex, task_spec)
+
+        # There is nothing to repeat
+        if self.count == 0:
+            return
 
         # TODO(m4dcoder): If the task_ex.action_executions and
         # task_ex.workflow_executions collection are not called,
@@ -318,6 +345,11 @@ class RetryPolicy(base.TaskPolicy):
 
         continue_on_evaluation = expressions.evaluate(
             self._continue_on_clause,
+            ctx_view
+        )
+
+        break_on_evaluation = expressions.evaluate(
+            self._break_on_clause,
             ctx_view
         )
 
@@ -350,7 +382,7 @@ class RetryPolicy(base.TaskPolicy):
 
         break_triggered = (
             task_ex.state == states.ERROR and
-            self.break_on
+            break_on_evaluation
         )
 
         if not retries_remain or break_triggered or stop_continue_flag:
@@ -375,7 +407,10 @@ class RetryPolicy(base.TaskPolicy):
 class TimeoutPolicy(base.TaskPolicy):
     _schema = {
         "properties": {
-            "delay": {"type": "integer"}
+            "delay": {
+                "type": "integer",
+                "minimum": 0
+            }
         }
     }
 
@@ -385,9 +420,13 @@ class TimeoutPolicy(base.TaskPolicy):
     def before_task_start(self, task_ex, task_spec):
         super(TimeoutPolicy, self).before_task_start(task_ex, task_spec)
 
+        # No timeout if delay is 0
+        if self.delay == 0:
+            return
+
         scheduler.schedule_call(
             None,
-            'mistral.engine.policies._fail_task_if_incomplete',
+            _FAIL_IF_INCOMPLETE_TASK_PATH,
             self.delay,
             task_ex_id=task_ex.id,
             timeout=self.delay
@@ -429,7 +468,10 @@ class PauseBeforePolicy(base.TaskPolicy):
 class ConcurrencyPolicy(base.TaskPolicy):
     _schema = {
         "properties": {
-            "concurrency": {"type": "integer"},
+            "concurrency": {
+                "type": "integer",
+                "minimum": 0
+            }
         }
     }
 
@@ -438,6 +480,9 @@ class ConcurrencyPolicy(base.TaskPolicy):
 
     def before_task_start(self, task_ex, task_spec):
         super(ConcurrencyPolicy, self).before_task_start(task_ex, task_spec)
+
+        if self.concurrency == 0:
+            return
 
         # This policy doesn't do anything except validating "concurrency"
         # property value and setting a variable into task runtime context.
@@ -454,7 +499,7 @@ class ConcurrencyPolicy(base.TaskPolicy):
         task_ex.runtime_context = runtime_context
 
 
-@db_utils.retry_on_deadlock
+@db_utils.retry_on_db_error
 @action_queue.process
 def _continue_task(task_ex_id):
     from mistral.engine import task_handler
@@ -463,7 +508,7 @@ def _continue_task(task_ex_id):
         task_handler.continue_task(db_api.get_task_execution(task_ex_id))
 
 
-@db_utils.retry_on_deadlock
+@db_utils.retry_on_db_error
 @action_queue.process
 def _complete_task(task_ex_id, state, state_info):
     from mistral.engine import task_handler
@@ -476,7 +521,7 @@ def _complete_task(task_ex_id, state, state_info):
         )
 
 
-@db_utils.retry_on_deadlock
+@db_utils.retry_on_db_error
 @action_queue.process
 def _fail_task_if_incomplete(task_ex_id, timeout):
     from mistral.engine import task_handler

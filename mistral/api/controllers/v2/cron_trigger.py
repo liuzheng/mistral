@@ -39,9 +39,12 @@ class CronTriggersController(rest.RestController):
         """
         acl.enforce('cron_triggers:get', context.ctx())
 
-        LOG.info('Fetch cron trigger [identifier=%s]', identifier)
+        LOG.debug('Fetch cron trigger [identifier=%s]', identifier)
 
-        db_model = db_api.get_cron_trigger(identifier)
+        # Use retries to prevent possible failures.
+        r = rest_utils.create_db_retry_object()
+        db_model = r.call(db_api.get_cron_trigger, identifier)
+
         return resources.CronTrigger.from_db_model(db_model)
 
     @rest_utils.wrap_wsme_controller_exception
@@ -57,7 +60,7 @@ class CronTriggersController(rest.RestController):
         """
         acl.enforce('cron_triggers:create', context.ctx())
 
-        LOG.info('Create cron trigger: %s', cron_trigger)
+        LOG.debug('Create cron trigger: %s', cron_trigger)
 
         values = cron_trigger.to_dict()
 
@@ -83,7 +86,7 @@ class CronTriggersController(rest.RestController):
         """
         acl.enforce('cron_triggers:delete', context.ctx())
 
-        LOG.info("Delete cron trigger [identifier=%s]", identifier)
+        LOG.debug("Delete cron trigger [identifier=%s]", identifier)
 
         triggers.delete_cron_trigger(identifier)
 
@@ -93,13 +96,15 @@ class CronTriggersController(rest.RestController):
                          wtypes.text, wtypes.text, types.uuid, types.jsontype,
                          types.jsontype, resources.SCOPE_TYPES, wtypes.text,
                          wtypes.IntegerType(minimum=1), wtypes.text,
-                         wtypes.text, wtypes.text, wtypes.text, bool)
+                         wtypes.text, wtypes.text, wtypes.text,
+                         types.uuid, bool)
     def get_all(self, marker=None, limit=None, sort_keys='created_at',
                 sort_dirs='asc', fields='', name=None, workflow_name=None,
                 workflow_id=None, workflow_input=None, workflow_params=None,
                 scope=None, pattern=None, remaining_executions=None,
                 first_execution_time=None, next_execution_time=None,
-                created_at=None, updated_at=None, all_projects=False):
+                created_at=None, updated_at=None, project_id=None,
+                all_projects=False):
         """Return all cron triggers.
 
         :param marker: Optional. Pagination marker for large data sets.
@@ -129,6 +134,8 @@ class CronTriggersController(rest.RestController):
         :param pattern: Optional. Keep only resources with a specific pattern.
         :param remaining_executions: Optional. Keep only resources with a
                                      specific number of remaining executions.
+        :param project_id: Optional. Keep only resources with the specific
+                           project id.
         :param first_execution_time: Optional. Keep only resources with a
                                      specific time and date of first execution.
         :param next_execution_time: Optional. Keep only resources with a
@@ -156,10 +163,11 @@ class CronTriggersController(rest.RestController):
             pattern=pattern,
             remaining_executions=remaining_executions,
             first_execution_time=first_execution_time,
-            next_execution_time=next_execution_time
+            next_execution_time=next_execution_time,
+            project_id=project_id,
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch cron triggers. marker=%s, limit=%s, sort_keys=%s, "
             "sort_dirs=%s, filters=%s, all_projects=%s",
             marker, limit, sort_keys, sort_dirs, filters, all_projects

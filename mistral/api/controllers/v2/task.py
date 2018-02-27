@@ -17,6 +17,8 @@ import json
 
 from oslo_log import log as logging
 from pecan import rest
+import sqlalchemy as sa
+import tenacity
 from wsme import types as wtypes
 import wsmeext.pecan as wsme_pecan
 
@@ -110,7 +112,7 @@ class TaskExecutionsController(rest.RestController):
             description=description
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch executions. marker=%s, limit=%s, sort_keys=%s, "
             "sort_dirs=%s, filters=%s", marker, limit, sort_keys, sort_dirs,
             filters
@@ -130,6 +132,19 @@ class TaskExecutionsController(rest.RestController):
         )
 
 
+# Use retries to prevent possible failures.
+@tenacity.retry(
+    retry=tenacity.retry_if_exception_type(sa.exc.OperationalError),
+    stop=tenacity.stop_after_attempt(10),
+    wait=tenacity.wait_incrementing(increment=100)  # 0.1 seconds
+)
+def _get_task_execution(id):
+    with db_api.transaction():
+        task_ex = db_api.get_task_execution(id)
+
+        return _get_task_resource_with_result(task_ex)
+
+
 class TasksController(rest.RestController):
     action_executions = action_execution.TasksActionExecutionController()
     workflow_executions = TaskExecutionsController()
@@ -142,12 +157,9 @@ class TasksController(rest.RestController):
         :param id: UUID of task to retrieve
         """
         acl.enforce('tasks:get', context.ctx())
-        LOG.info("Fetch task [id=%s]", id)
+        LOG.debug("Fetch task [id=%s]", id)
 
-        with db_api.transaction():
-            task_ex = db_api.get_task_execution(id)
-
-            return _get_task_resource_with_result(task_ex)
+        return _get_task_execution(id)
 
     @rest_utils.wrap_wsme_controller_exception
     @wsme_pecan.wsexpose(resources.Tasks, types.uuid, int, types.uniquelist,
@@ -220,7 +232,7 @@ class TasksController(rest.RestController):
             env=env
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch tasks. marker=%s, limit=%s, sort_keys=%s, sort_dirs=%s,"
             " filters=%s", marker, limit, sort_keys, sort_dirs, filters
         )
@@ -248,7 +260,7 @@ class TasksController(rest.RestController):
         """
         acl.enforce('tasks:update', context.ctx())
 
-        LOG.info("Update task execution [id=%s, task=%s]", id, task)
+        LOG.debug("Update task execution [id=%s, task=%s]", id, task)
 
         with db_api.transaction():
             task_ex = db_api.get_task_execution(id)
@@ -370,7 +382,7 @@ class ExecutionTasksController(rest.RestController):
             env=env
         )
 
-        LOG.info(
+        LOG.debug(
             "Fetch tasks. workflow_execution_id=%s, marker=%s, limit=%s, "
             "sort_keys=%s, sort_dirs=%s, filters=%s",
             workflow_execution_id, marker, limit, sort_keys, sort_dirs,

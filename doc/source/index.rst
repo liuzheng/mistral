@@ -1,5 +1,5 @@
-Welcome to Mistral's documentation!
-===================================
+Welcome to the Mistral documentation!
+=====================================
 
 Mistral is the OpenStack workflow service. This project aims to provide
 a mechanism to define tasks and workflows without writing code, manage
@@ -41,7 +41,7 @@ User guide
 .. toctree::
    :maxdepth: 2
 
-   user/dsl_v2
+   user/wf_lang_v2
 
 **CLI**
 

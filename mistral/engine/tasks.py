@@ -1,5 +1,6 @@
 # Copyright 2016 - Nokia Networks.
 # Copyright 2016 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -15,6 +16,7 @@
 
 import abc
 import copy
+from oslo_config import cfg
 from oslo_log import log as logging
 from osprofiler import profiler
 import six
@@ -25,6 +27,8 @@ from mistral.engine import dispatcher
 from mistral.engine import policies
 from mistral import exceptions as exc
 from mistral import expressions as expr
+from mistral.notifiers import base as notif
+from mistral.notifiers import notification_events as events
 from mistral import utils
 from mistral.utils import wf_trace
 from mistral.workflow import base as wf_base
@@ -56,6 +60,23 @@ class Task(object):
         self.reset_flag = False
         self.created = False
         self.state_changed = False
+
+    def notify(self, old_task_state, new_task_state):
+        publishers = self.wf_ex.params.get('notify')
+
+        if not publishers and not isinstance(publishers, list):
+            return
+
+        notifier = notif.get_notifier(cfg.CONF.notifier.type)
+        event = events.identify_task_event(old_task_state, new_task_state)
+
+        notifier.notify(
+            self.task_ex.id,
+            self.task_ex.to_dict(),
+            event,
+            self.task_ex.updated_at,
+            publishers
+        )
 
     def is_completed(self):
         return self.task_ex and states.is_completed(self.task_ex.state)
@@ -125,29 +146,43 @@ class Task(object):
         :param state: New task state.
         :param state_info: New state information (i.e. error message).
         :param processed: New "processed" flag value.
+        :return: True if the state was changed as a result of this call,
+            False otherwise.
         """
 
         assert self.task_ex
 
-        if (self.task_ex.state != state or
-                self.task_ex.state_info != state_info):
+        cur_state = self.task_ex.state
+
+        if cur_state != state or self.task_ex.state_info != state_info:
+            task_ex = db_api.update_task_execution_state(
+                id=self.task_ex.id,
+                cur_state=cur_state,
+                state=state
+            )
+
+            if task_ex is None:
+                # Do nothing because the update query did not change the DB.
+                return False
+
+            self.task_ex = task_ex
+            self.task_ex.state_info = state_info
+            self.state_changed = True
+
+            if processed is not None:
+                self.task_ex.processed = processed
+
             wf_trace.info(
                 self.task_ex.workflow_execution,
                 "Task '%s' (%s) [%s -> %s, msg=%s]" %
                 (self.task_ex.name,
                  self.task_ex.id,
-                 self.task_ex.state,
+                 cur_state,
                  state,
                  state_info)
             )
 
-            self.state_changed = True
-
-        self.task_ex.state = state
-        self.task_ex.state_info = state_info
-
-        if processed is not None:
-            self.task_ex.processed = processed
+        return True
 
     @profiler.trace('task-complete')
     def complete(self, state, state_info=None):
@@ -163,11 +198,23 @@ class Task(object):
 
         assert self.task_ex
 
+        # Record the current task state.
+        old_task_state = self.task_ex.state
+
         # Ignore if task already completed.
-        if states.is_completed(self.task_ex.state):
+        if self.is_completed():
+            # Publish task event again so subscribers know
+            # task completed state is being processed again.
+            self.notify(old_task_state, self.task_ex.state)
+
             return
 
-        self.set_state(state, state_info)
+        # If we were unable to change the task state it means that it was
+        # already changed by a concurrent process. In this case we need to
+        # skip all regular completion logic like scheduling new tasks,
+        # running engine commands and publishing.
+        if not self.set_state(state, state_info):
+            return
 
         data_flow.publish_variables(self.task_ex, self.task_spec)
 
@@ -186,6 +233,9 @@ class Task(object):
         # If workflow is paused we shouldn't schedule new commands
         # and mark task as processed.
         if states.is_paused(self.wf_ex.state):
+            # Publish task event even if the workflow is paused.
+            self.notify(old_task_state, self.task_ex.state)
+
             return
 
         wf_ctrl = wf_base.get_controller(self.wf_ex, self.wf_spec)
@@ -196,6 +246,9 @@ class Task(object):
         # Mark task as processed after all decisions have been made
         # upon its completion.
         self.task_ex.processed = True
+
+        # Publish task event.
+        self.notify(old_task_state, self.task_ex.state)
 
         dispatcher.dispatch_workflow_commands(self.wf_ex, cmds)
 
@@ -211,8 +264,15 @@ class Task(object):
 
         assert self.task_ex
 
+        # Record the current task state.
+        old_task_state = self.task_ex.state
+
         # Ignore if task already completed.
         if states.is_completed(self.task_ex.state):
+            # Publish task event again so subscribers know
+            # task completed state is being processed again.
+            self.notify(old_task_state, self.task_ex.state)
+
             return
 
         # Update only if state transition is valid.
@@ -227,6 +287,9 @@ class Task(object):
             return
 
         self.set_state(state, state_info)
+
+        # Publish event.
+        self.notify(old_task_state, self.task_ex.state)
 
     def _before_task_start(self):
         policies_spec = self.task_spec.get_policies()
@@ -270,10 +333,6 @@ class Task(object):
             values['runtime_context']['triggered_by'] = self.triggered_by
 
         self.task_ex = db_api.create_task_execution(values)
-
-        # Add to collection explicitly so that it's in a proper
-        # state within the current session.
-        self.wf_ex.task_executions.append(self.task_ex)
 
         self.created = True
 
@@ -325,6 +384,9 @@ class RegularTask(Task):
 
         self._create_task_execution()
 
+        # Publish event.
+        self.notify(None, self.task_ex.state)
+
         LOG.debug(
             'Starting task [workflow=%s, task=%s, init_state=%s]',
             self.wf_ex.name,
@@ -352,7 +414,13 @@ class RegularTask(Task):
                 'Rerunning succeeded tasks is not supported.'
             )
 
+        # Record the current task state.
+        old_task_state = self.task_ex.state
+
         self.set_state(states.RUNNING, None, processed=False)
+
+        # Publish event.
+        self.notify(old_task_state, self.task_ex.state)
 
         self._update_inbound_context()
         self._update_triggered_by()
@@ -360,13 +428,16 @@ class RegularTask(Task):
         self._schedule_actions()
 
     def _update_inbound_context(self):
-        assert self.task_ex
+        task_ex = self.task_ex
+        assert task_ex
 
         wf_ctrl = wf_base.get_controller(self.wf_ex, self.wf_spec)
 
         self.ctx = wf_ctrl.get_task_inbound_context(self.task_spec)
+        data_flow.add_current_task_to_context(self.ctx, task_ex.id,
+                                              task_ex.name)
 
-        utils.update_dict(self.task_ex.in_context, self.ctx)
+        utils.update_dict(task_ex.in_context, self.ctx)
 
     def _update_triggered_by(self):
         assert self.task_ex
@@ -406,7 +477,8 @@ class RegularTask(Task):
         action.schedule(
             input_dict,
             target,
-            safe_rerun=self.task_spec.get_safe_rerun()
+            safe_rerun=self.task_spec.get_safe_rerun(),
+            timeout=self._get_timeout()
         )
 
     @profiler.trace('regular-task-get-target', hide_args=True)
@@ -483,6 +555,22 @@ class RegularTask(Task):
                                        wf_ctx=self.wf_ex.context)
 
         return actions.PythonAction(action_def, task_ex=self.task_ex)
+
+    def _get_timeout(self):
+        timeout = self.task_spec.get_policies().get_timeout()
+
+        if not isinstance(timeout, (int, float)):
+            wf_ex = self.task_ex.workflow_execution
+
+            ctx_view = data_flow.ContextView(
+                self.task_ex.in_context,
+                wf_ex.context,
+                wf_ex.input
+            )
+
+            timeout = expr.evaluate_recursively(data=timeout, context=ctx_view)
+
+        return timeout if timeout > 0 else None
 
 
 class WithItemsTask(RegularTask):
@@ -570,7 +658,8 @@ class WithItemsTask(RegularTask):
                 input_dict,
                 target,
                 index=i,
-                safe_rerun=self.task_spec.get_safe_rerun()
+                safe_rerun=self.task_spec.get_safe_rerun(),
+                timeout=self._get_timeout()
             )
 
             self._decrease_capacity(1)

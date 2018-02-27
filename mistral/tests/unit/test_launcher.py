@@ -1,4 +1,5 @@
 # Copyright 2017 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -13,10 +14,6 @@
 #    limitations under the License.
 
 import eventlet
-import mock
-import pecan.testing
-
-from oslo_config import cfg
 
 from mistral.api import service as api_service
 from mistral.cmd import launch
@@ -27,21 +24,12 @@ class ServiceLauncherTest(base.DbTestCase):
 
     def setUp(self):
         super(ServiceLauncherTest, self).setUp()
+
+        self.override_config('enabled', False, group='cron_trigger')
+
         launch.reset_server_managers()
 
-    @mock.patch('mistral.api.app.setup_app')
-    @mock.patch.object(api_service.wsgi, 'Server')
-    def test_launch_all(self, wsgi_server, mock_app):
-        mock_app.return_value = pecan.testing.load_test_app({
-            'app': {
-                'root': cfg.CONF.pecan.root,
-                'modules': cfg.CONF.pecan.modules,
-                'debug': cfg.CONF.pecan.debug,
-                'auth_enable': cfg.CONF.pecan.auth_enable,
-                'disable_cron_trigger_thread': True
-            }
-        })
-
+    def test_launch_all(self):
         eventlet.spawn(launch.launch_any, launch.LAUNCH_OPTIONS.keys())
 
         for i in range(0, 50):
@@ -59,22 +47,10 @@ class ServiceLauncherTest(base.DbTestCase):
         api_server = api_service.WSGIService('mistral_api')
         api_workers = api_server.workers
 
-        self.assertEqual(len(svr_proc_mgr.children.keys()), api_workers)
-        self.assertEqual(len(svr_thrd_mgr.services.services), 3)
+        self._await(lambda: len(svr_proc_mgr.children.keys()) == api_workers)
+        self._await(lambda: len(svr_thrd_mgr.services.services) == 4)
 
-    @mock.patch('mistral.api.app.setup_app')
-    @mock.patch.object(api_service.wsgi, 'Server')
-    def test_launch_process(self, wsgi_server, mock_app):
-        mock_app.return_value = pecan.testing.load_test_app({
-            'app': {
-                'root': cfg.CONF.pecan.root,
-                'modules': cfg.CONF.pecan.modules,
-                'debug': cfg.CONF.pecan.debug,
-                'auth_enable': cfg.CONF.pecan.auth_enable,
-                'disable_cron_trigger_thread': True
-            }
-        })
-
+    def test_launch_process(self):
         eventlet.spawn(launch.launch_any, ['api'])
 
         for i in range(0, 50):
@@ -93,7 +69,7 @@ class ServiceLauncherTest(base.DbTestCase):
         api_server = api_service.WSGIService('mistral_api')
         api_workers = api_server.workers
 
-        self.assertEqual(len(svr_proc_mgr.children.keys()), api_workers)
+        self._await(lambda: len(svr_proc_mgr.children.keys()) == api_workers)
 
     def test_launch_thread(self):
         eventlet.spawn(launch.launch_any, ['engine'])
@@ -111,4 +87,4 @@ class ServiceLauncherTest(base.DbTestCase):
         self.assertIsNone(svr_proc_mgr)
         self.assertIsNotNone(svr_thrd_mgr)
 
-        self.assertEqual(len(svr_thrd_mgr.services.services), 1)
+        self._await(lambda: len(svr_thrd_mgr.services.services) == 1)

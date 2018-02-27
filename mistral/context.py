@@ -15,6 +15,7 @@
 
 import base64
 
+from mistral_lib.actions import context as lib_ctx
 from oslo_config import cfg
 from oslo_context import context as oslo_context
 import oslo_messaging as messaging
@@ -53,16 +54,16 @@ class MistralContext(oslo_context.RequestContext):
         # using the variable provided by oslo_context in future.
         super(MistralContext, self).__init__(overwrite=False, **kwargs)
 
-    def convert_to_dict(self):
-        """Return a dictionary of context attributes.
-
-        Use get_logging_values() instead of to_dict() from parent class to get
-        more information from the context. This method is not named "to_dict"
-        to avoid recursive call.
-        """
-        ctx_dict = self.get_logging_values()
+    def to_dict(self):
+        """Return a dictionary of context attributes."""
+        ctx_dict = super(MistralContext, self).to_dict()
         ctx_dict.update(
             {
+                'user_name': self.user_name,
+                'project_name': self.project_name,
+                'domain_name': self.domain_name,
+                'user_domain_name': self.user_domain_name,
+                'project_domain_name': self.project_domain_name,
                 'auth_uri': self.auth_uri,
                 'auth_cacert': self.auth_cacert,
                 'insecure': self.insecure,
@@ -198,7 +199,7 @@ class RpcContextSerializer(messaging.Serializer):
         return self.entity_serializer.deserialize(entity)
 
     def serialize_context(self, context):
-        ctx = context.convert_to_dict()
+        ctx = context.to_dict()
 
         pfr = profiler.get()
 
@@ -254,3 +255,29 @@ class ContextHook(hooks.PecanHook):
 
     def after(self, state):
         set_ctx(None)
+
+
+def create_action_context(execution_ctx):
+
+    context = ctx()
+
+    security_ctx = lib_ctx.SecurityContext(
+        auth_cacert=context.auth_cacert,
+        auth_token=context.auth_token,
+        auth_uri=context.auth_uri,
+        expires_at=context.expires_at,
+        insecure=context.insecure,
+        is_target=context.is_target,
+        is_trust_scoped=context.is_trust_scoped,
+        project_id=context.project_id,
+        project_name=context.project_name,
+        user_name=context.user_name,
+        redelivered=context.redelivered,
+        region_name=context.region_name,
+        service_catalog=context.service_catalog,
+        trust_id=context.trust_id,
+    )
+
+    ex_ctx = lib_ctx.ExecutionContext(**execution_ctx)
+
+    return lib_ctx.ActionContext(security_ctx, ex_ctx)

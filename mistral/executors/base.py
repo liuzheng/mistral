@@ -49,16 +49,20 @@ class Executor(object):
 
     @abc.abstractmethod
     def run_action(self, action_ex_id, action_cls_str, action_cls_attrs,
-                   params, safe_rerun, redelivered=False,
-                   target=None, async_=True):
+                   params, safe_rerun, execution_context, redelivered=False,
+                   target=None, async_=True, timeout=None):
         """Runs action.
 
+        :param timeout: a period of time in seconds after which execution of
+            action will be interrupted
         :param action_ex_id: Corresponding action execution id.
         :param action_cls_str: Path to action class in dot notation.
         :param action_cls_attrs: Attributes of action class which
             will be set to.
         :param params: Action parameters.
         :param safe_rerun: Tells if given action can be safely rerun.
+        :param execution_context: A dict of values providing information about
+            the current execution.
         :param redelivered: Tells if given action was run before on another
             executor.
         :param target: Target (group of action executors).

@@ -19,21 +19,18 @@ from mistral.tests.unit.mstrlfixtures import policy_fixtures
 
 
 class PolicyTestCase(base.BaseTest):
-    """Tests whether the configuration of the policy engine is corect."""
+    """Tests whether the configuration of the policy engine is correct."""
     def setUp(self):
         super(PolicyTestCase, self).setUp()
 
         self.policy = self.useFixture(policy_fixtures.PolicyFixture())
 
         rules = {
-            "admin_only": "is_admin:True",
-            "admin_or_owner": "is_admin:True or project_id:%(project_id)s",
-
             "example:admin": "rule:admin_only",
             "example:admin_or_owner": "rule:admin_or_owner"
         }
 
-        self.policy.set_rules(rules)
+        self.policy.register_rules(rules)
 
     def test_admin_api_allowed(self):
         auth_ctx = base.get_context(default=True, admin=True)

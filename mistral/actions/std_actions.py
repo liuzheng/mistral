@@ -15,18 +15,18 @@
 
 from email import header
 from email.mime import text
-
 import json
-import requests
-import six
 import smtplib
 import time
+
+from oslo_log import log as logging
+import requests
+import six
 
 from mistral import exceptions as exc
 from mistral.utils import javascript
 from mistral.utils import ssh_utils
 from mistral_lib import actions
-from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -80,20 +80,31 @@ class AsyncNoOpAction(NoOpAction):
 class FailAction(actions.Action):
     """'Always fail' action.
 
-    This action just always throws an instance of ActionException.
+    If you pass the `error_data` parameter, this action will be failed and
+    return this data as error data. Otherwise, the action just throws an
+    instance of ActionException.
+
     This behavior is useful in a number of cases, especially if we need to
     test a scenario where some of workflow tasks fail.
+
+    :param error_data: Action will be failed with this data
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, error_data=None):
+        self.error_data = error_data
 
     def run(self, context):
         LOG.info('Running fail action.')
 
+        if self.error_data:
+            return actions.Result(error=self.error_data)
+
         raise exc.ActionException('Fail action expected exception.')
 
     def test(self, context):
+        if self.error_data:
+            return actions.Result(error=self.error_data)
+
         raise exc.ActionException('Fail action expected exception.')
 
 
@@ -237,44 +248,19 @@ class HTTPAction(actions.Action):
 
 class MistralHTTPAction(HTTPAction):
 
-    def __init__(self,
-                 action_context,
-                 url,
-                 method="GET",
-                 params=None,
-                 body=None,
-                 headers=None,
-                 cookies=None,
-                 auth=None,
-                 timeout=None,
-                 allow_redirects=None,
-                 proxies=None,
-                 verify=None):
+    def run(self, context):
+        self.headers = self.headers or {}
 
-        actx = action_context
-
-        headers = headers or {}
-        headers.update({
-            'Mistral-Workflow-Name': actx.get('workflow_name'),
-            'Mistral-Workflow-Execution-Id': actx.get('workflow_execution_id'),
-            'Mistral-Task-Id': actx.get('task_id'),
-            'Mistral-Action-Execution-Id': actx.get('action_execution_id'),
-            'Mistral-Callback-URL': actx.get('callback_url'),
+        exec_ctx = context.execution
+        self.headers.update({
+            'Mistral-Workflow-Name': exec_ctx.workflow_name,
+            'Mistral-Workflow-Execution-Id': exec_ctx.workflow_execution_id,
+            'Mistral-Task-Id': exec_ctx.task_id,
+            'Mistral-Action-Execution-Id': exec_ctx.action_execution_id,
+            'Mistral-Callback-URL': exec_ctx.callback_url,
         })
 
-        super(MistralHTTPAction, self).__init__(
-            url,
-            method,
-            params,
-            body,
-            headers,
-            cookies,
-            auth,
-            timeout,
-            allow_redirects,
-            proxies,
-            verify,
-        )
+        super(MistralHTTPAction, self).run(context)
 
     def is_sync(self):
         return False

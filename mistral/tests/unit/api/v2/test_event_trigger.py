@@ -14,7 +14,9 @@
 
 import copy
 import json
+
 import mock
+import sqlalchemy as sa
 
 from mistral.db.v2 import api as db_api
 from mistral.db.v2.sqlalchemy import models
@@ -74,6 +76,21 @@ class TestEventTriggerController(base.APITest):
         self.assertEqual(200, resp.status_int)
         self.assertDictEqual(TRIGGER, resp.json)
 
+    @mock.patch.object(db_api, 'get_event_trigger')
+    def test_get_operational_error(self, mocked_get):
+        mocked_get.side_effect = [
+            # Emulating DB OperationalError
+            sa.exc.OperationalError('Mock', 'mock', 'mock'),
+            TRIGGER_DB  # Successful run
+        ]
+
+        resp = self.app.get(
+            '/v2/event_triggers/09cc56a9-d15e-4494-a6e2-c4ec8bdaacae'
+        )
+
+        self.assertEqual(200, resp.status_int)
+        self.assertDictEqual(TRIGGER, resp.json)
+
     @mock.patch.object(db_api, "get_event_trigger", MOCK_NOT_FOUND)
     def test_get_not_found(self):
         resp = self.app.get(
@@ -116,6 +133,8 @@ class TestEventTriggerController(base.APITest):
     @mock.patch.object(db_api, "get_workflow_definition", MOCK_WF)
     @mock.patch.object(triggers, "create_event_trigger")
     def test_post_public(self, create_trigger):
+        self.ctx = unit_base.get_context(default=False, admin=True)
+        self.mock_ctx.return_value = self.ctx
         trigger = copy.deepcopy(TRIGGER)
         trigger['scope'] = 'public'
         trigger.pop('id')
@@ -153,7 +172,7 @@ class TestEventTriggerController(base.APITest):
 
         self.assertEqual(404, resp.status_int)
 
-    @mock.patch.object(db_api, 'ensure_event_trigger_exists', MOCK_NONE)
+    @mock.patch.object(db_api, 'get_event_trigger', MOCK_NONE)
     @mock.patch('mistral.rpc.clients.get_event_engine_client')
     @mock.patch('mistral.db.v2.api.update_event_trigger')
     def test_put(self, mock_update, mock_rpc_client):
@@ -223,6 +242,21 @@ class TestEventTriggerController(base.APITest):
 
     @mock.patch.object(db_api, "get_event_triggers", MOCK_TRIGGERS)
     def test_get_all(self):
+        resp = self.app.get('/v2/event_triggers')
+
+        self.assertEqual(200, resp.status_int)
+
+        self.assertEqual(1, len(resp.json['event_triggers']))
+        self.assertDictEqual(TRIGGER, resp.json['event_triggers'][0])
+
+    @mock.patch.object(db_api, 'get_event_triggers')
+    def test_get_all_operational_error(self, mocked_get_all):
+        mocked_get_all.side_effect = [
+            # Emulating DB OperationalError
+            sa.exc.OperationalError('Mock', 'mock', 'mock'),
+            [TRIGGER_DB]  # Successful run
+        ]
+
         resp = self.app.get('/v2/event_triggers')
 
         self.assertEqual(200, resp.status_int)

@@ -1,5 +1,6 @@
 # Copyright 2013 - Mirantis, Inc.
 # Copyright 2016 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -161,6 +162,23 @@ engine_opts = [
         default=1024,
         help=_('The default maximum size in KB of large text fields '
                'of runtime execution objects. Use -1 for no limit.')
+    ),
+    cfg.IntOpt(
+        'execution_integrity_check_delay',
+        default=20,
+        help=_('A number of seconds since the last update of a task'
+               ' execution in RUNNING state after which Mistral will'
+               ' start checking its integrity, meaning that if all'
+               ' associated actions/workflows are finished its state'
+               ' will be restored automatically. If this property is'
+               ' set to a negative value Mistral will never be doing '
+               ' this check.')
+    ),
+    cfg.IntOpt(
+        'action_definition_cache_time',
+        default=60,
+        help=_('A number of seconds that indicates how long action '
+               'definitions should be stored in the local cache.')
     )
 ]
 
@@ -217,6 +235,43 @@ scheduler_opts = [
             'delay limited by this property.'
         )
     ),
+    cfg.IntOpt(
+        'batch_size',
+        default=None,
+        min=1,
+        help=(
+            'The max number of delayed calls will be selected during '
+            'a scheduler iteration. '
+            'If this property equals None then there is no '
+            'restriction on selection.'
+        )
+    )
+]
+
+cron_trigger_opts = [
+    cfg.BoolOpt(
+        'enabled',
+        default=True,
+        help=(
+            'If this value is set to False then the subsystem of cron triggers'
+            ' is disabled. Disabling cron triggers increases system'
+            ' performance.'
+        )
+    ),
+    cfg.IntOpt(
+        'execution_interval',
+        default=1,
+        min=1,
+        help=(
+            'This setting defines how frequently Mistral checks for cron ',
+            'triggers that need execution. By default this is every second ',
+            'which can lead to high system load. Increasing the number will ',
+            'reduce the load but also limit the minimum freqency. For ',
+            'example, a cron trigger can be configured to run every second ',
+            'but if the execution_interval is set to 60, it will only run ',
+            'once per minute.'
+        )
+    )
 ]
 
 event_engine_opts = [
@@ -244,6 +299,37 @@ event_engine_opts = [
         default='/etc/mistral/event_definitions.yaml',
         help=_('Configuration file for event definitions.')
     ),
+]
+
+notifier_opts = [
+    cfg.StrOpt(
+        'type',
+        choices=['local', 'remote'],
+        default='remote',
+        help=(
+            'Type of notifier. Use local to run the notifier within the '
+            'engine server. Use remote if the notifier is launched as '
+            'a separate server to process events.'
+        )
+    ),
+    cfg.StrOpt(
+        'host',
+        default='0.0.0.0',
+        help=_('Name of the notifier node. This can be an opaque '
+               'identifier. It is not necessarily a hostname, '
+               'FQDN, or IP address.')
+    ),
+    cfg.StrOpt(
+        'topic',
+        default='mistral_notifier',
+        help=_('The message topic that the notifier server listens on.')
+    ),
+    cfg.ListOpt(
+        'notify',
+        item_type=eval,
+        bounds=True,
+        help=_('List of publishers to publish notification.')
+    )
 ]
 
 execution_expiration_policy_opts = [
@@ -340,7 +426,7 @@ openstack_actions_opts = [
     ),
     cfg.ListOpt(
         'modules-support-region',
-        default=['nova', 'glance', 'ceilometer', 'heat', 'neutron', 'cinder',
+        default=['nova', 'glance', 'heat', 'neutron', 'cinder',
                  'trove', 'ironic', 'designate', 'murano', 'tacker', 'senlin',
                  'aodh', 'gnocchi'],
         help=_('List of module names that support region in actions.')
@@ -369,13 +455,16 @@ API_GROUP = 'api'
 ENGINE_GROUP = 'engine'
 EXECUTOR_GROUP = 'executor'
 SCHEDULER_GROUP = 'scheduler'
+CRON_TRIGGER_GROUP = 'cron_trigger'
 EVENT_ENGINE_GROUP = 'event_engine'
+NOTIFIER_GROUP = 'notifier'
 PECAN_GROUP = 'pecan'
 COORDINATION_GROUP = 'coordination'
 EXECUTION_EXPIRATION_POLICY_GROUP = 'execution_expiration_policy'
 PROFILER_GROUP = profiler.list_opts()[0][0]
 KEYCLOAK_OIDC_GROUP = "keycloak_oidc"
 OPENSTACK_ACTIONS_GROUP = 'openstack_actions'
+
 
 CONF.register_opt(wf_trace_log_name_opt)
 CONF.register_opt(auth_type_opt)
@@ -388,11 +477,13 @@ CONF.register_opts(api_opts, group=API_GROUP)
 CONF.register_opts(engine_opts, group=ENGINE_GROUP)
 CONF.register_opts(executor_opts, group=EXECUTOR_GROUP)
 CONF.register_opts(scheduler_opts, group=SCHEDULER_GROUP)
+CONF.register_opts(cron_trigger_opts, group=CRON_TRIGGER_GROUP)
 CONF.register_opts(
     execution_expiration_policy_opts,
     group=EXECUTION_EXPIRATION_POLICY_GROUP
 )
 CONF.register_opts(event_engine_opts, group=EVENT_ENGINE_GROUP)
+CONF.register_opts(notifier_opts, group=NOTIFIER_GROUP)
 CONF.register_opts(pecan_opts, group=PECAN_GROUP)
 CONF.register_opts(coordination_opts, group=COORDINATION_GROUP)
 CONF.register_opts(profiler_opts, group=PROFILER_GROUP)
@@ -406,8 +497,14 @@ CLI_OPTS = [
 
 default_group_opts = itertools.chain(
     CLI_OPTS,
-    [wf_trace_log_name_opt, auth_type_opt, js_impl_opt, rpc_impl_opt,
-     rpc_response_timeout_opt, expiration_token_duration]
+    [
+        wf_trace_log_name_opt,
+        auth_type_opt,
+        js_impl_opt,
+        rpc_impl_opt,
+        rpc_response_timeout_opt,
+        expiration_token_duration
+    ]
 )
 
 CONF.register_cli_opts(CLI_OPTS)
@@ -429,6 +526,9 @@ def list_opts():
         (ENGINE_GROUP, engine_opts),
         (EXECUTOR_GROUP, executor_opts),
         (EVENT_ENGINE_GROUP, event_engine_opts),
+        (SCHEDULER_GROUP, scheduler_opts),
+        (CRON_TRIGGER_GROUP, cron_trigger_opts),
+        (NOTIFIER_GROUP, notifier_opts),
         (PECAN_GROUP, pecan_opts),
         (COORDINATION_GROUP, coordination_opts),
         (EXECUTION_EXPIRATION_POLICY_GROUP, execution_expiration_policy_opts),
@@ -449,7 +549,7 @@ def parse_args(args=None, usage=None, default_config_files=None):
     CONF(
         args=args,
         project='mistral',
-        version=version,
+        version=version.version_string,
         usage=usage,
         default_config_files=default_config_files
     )

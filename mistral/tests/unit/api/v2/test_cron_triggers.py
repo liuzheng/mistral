@@ -14,7 +14,9 @@
 
 import copy
 import json
+
 import mock
+import sqlalchemy as sa
 
 from mistral.db.v2 import api as db_api
 from mistral.db.v2.sqlalchemy import models
@@ -72,6 +74,19 @@ MOCK_DUPLICATE = mock.MagicMock(side_effect=exc.DBDuplicateEntryError())
 class TestCronTriggerController(base.APITest):
     @mock.patch.object(db_api, "get_cron_trigger", MOCK_TRIGGER)
     def test_get(self):
+        resp = self.app.get('/v2/cron_triggers/my_cron_trigger')
+
+        self.assertEqual(200, resp.status_int)
+        self.assertDictEqual(TRIGGER, resp.json)
+
+    @mock.patch.object(db_api, 'get_cron_trigger')
+    def test_get_operational_error(self, mocked_get):
+        mocked_get.side_effect = [
+            # Emulating DB OperationalError
+            sa.exc.OperationalError('Mock', 'mock', 'mock'),
+            TRIGGER_DB  # Successful run
+        ]
+
         resp = self.app.get('/v2/cron_triggers/my_cron_trigger')
 
         self.assertEqual(200, resp.status_int)
@@ -179,6 +194,21 @@ class TestCronTriggerController(base.APITest):
         self.assertDictEqual(TRIGGER, resp.json['cron_triggers'][0])
 
     @mock.patch.object(db_api, 'get_cron_triggers')
+    def test_get_all_operational_error(self, mocked_get_all):
+        mocked_get_all.side_effect = [
+            # Emulating DB OperationalError
+            sa.exc.OperationalError('Mock', 'mock', 'mock'),
+            [TRIGGER_DB]  # Successful run
+        ]
+
+        resp = self.app.get('/v2/cron_triggers')
+
+        self.assertEqual(200, resp.status_int)
+
+        self.assertEqual(1, len(resp.json['cron_triggers']))
+        self.assertDictEqual(TRIGGER, resp.json['cron_triggers'][0])
+
+    @mock.patch.object(db_api, 'get_cron_triggers')
     @mock.patch('mistral.context.MistralContext.from_environ')
     def test_get_all_projects_admin(self, mock_context, mock_get_triggers):
         admin_ctx = unit_base.get_context(admin=True)
@@ -189,6 +219,25 @@ class TestCronTriggerController(base.APITest):
         self.assertEqual(200, resp.status_int)
 
         self.assertTrue(mock_get_triggers.call_args[1].get('insecure', False))
+
+    @mock.patch.object(db_api, 'get_cron_triggers')
+    @mock.patch('mistral.context.MistralContext.from_environ')
+    def test_get_all_filter_project(self, mock_context, mock_get_triggers):
+        admin_ctx = unit_base.get_context(admin=True)
+        mock_context.return_value = admin_ctx
+
+        resp = self.app.get(
+            '/v2/cron_triggers?all_projects=true&'
+            'project_id=192796e61c174f718d6147b129f3f2ff'
+        )
+
+        self.assertEqual(200, resp.status_int)
+
+        self.assertTrue(mock_get_triggers.call_args[1].get('insecure', False))
+        self.assertEqual(
+            {'eq': '192796e61c174f718d6147b129f3f2ff'},
+            mock_get_triggers.call_args[1].get('project_id')
+        )
 
     @mock.patch.object(db_api, "get_cron_triggers", MOCK_EMPTY)
     def test_get_all_empty(self):

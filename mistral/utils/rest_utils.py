@@ -16,16 +16,20 @@
 import functools
 import json
 
+from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import pecan
 import six
-
+import sqlalchemy as sa
+import tenacity
 import webob
 from wsme import exc as wsme_exc
+
 
 from mistral import context as auth_ctx
 from mistral.db.v2.sqlalchemy import api as db_api
 from mistral import exceptions as exc
+
 
 LOG = logging.getLogger(__name__)
 
@@ -127,7 +131,7 @@ def filters_to_dict(**kwargs):
 
 def get_all(list_cls, cls, get_all_function, get_function,
             resource_function=None, marker=None, limit=None,
-            sort_keys='created_at', sort_dirs='asc', fields='',
+            sort_keys=None, sort_dirs=None, fields=None,
             all_projects=False, **filters):
     """Return a list of cls.
 
@@ -143,11 +147,11 @@ def get_all(list_cls, cls, get_all_function, get_function,
     :param limit: Optional. Maximum number of resources to return in a
                   single result. Default value is None for backward
                   compatibility.
-    :param sort_keys: Optional. Columns to sort results by.
-                      Default: created_at.
-    :param sort_dirs: Optional. Directions to sort corresponding to
+    :param sort_keys: Optional. List of columns to sort results by.
+                      Default: ['created_at'].
+    :param sort_dirs: Optional. List of directions to sort corresponding to
                       sort_keys, "asc" or "desc" can be chosen.
-                      Default: asc.
+                      Default: ['asc'].
     :param fields: Optional. A specified list of fields of the resource to
                    be returned. 'id' will be included automatically in
                    fields if it's provided, since it will be used when
@@ -155,6 +159,10 @@ def get_all(list_cls, cls, get_all_function, get_function,
     :param filters: Optional. A specified dictionary of filters to match.
     :param all_projects: Optional. Get resources of all projects.
     """
+    sort_keys = ['created_at'] if sort_keys is None else sort_keys
+    sort_dirs = ['asc'] if sort_dirs is None else sort_dirs
+    fields = [] if fields is None else fields
+
     if fields and 'id' not in fields:
         fields.insert(0, 'id')
 
@@ -174,28 +182,7 @@ def get_all(list_cls, cls, get_all_function, get_function,
     if marker:
         marker_obj = get_function(marker)
 
-    rest_resources = []
-
-    # If only certain fields are requested then we ignore "resource_function"
-    # parameter because it doesn't make sense anymore.
-    if fields:
-        db_list = get_all_function(
-            limit=limit,
-            marker=marker_obj,
-            sort_keys=sort_keys,
-            sort_dirs=sort_dirs,
-            fields=fields,
-            insecure=insecure,
-            **filters
-        )
-
-        for obj_values in db_list:
-            # Note: in case if only certain fields have been requested
-            # "db_list" contains tuples with values of db objects.
-            rest_resources.append(
-                cls.from_tuples(zip(fields, obj_values))
-            )
-    else:
+    def _get_all_function():
         with db_api.transaction():
             db_models = get_all_function(
                 limit=limit,
@@ -214,6 +201,34 @@ def get_all(list_cls, cls, get_all_function, get_function,
 
                 rest_resources.append(rest_resource)
 
+    rest_resources = []
+
+    r = create_db_retry_object()
+
+    # If only certain fields are requested then we ignore "resource_function"
+    # parameter because it doesn't make sense anymore.
+    if fields:
+        # Use retries to prevent possible failures.
+        db_list = r.call(
+            get_all_function,
+            limit=limit,
+            marker=marker_obj,
+            sort_keys=sort_keys,
+            sort_dirs=sort_dirs,
+            fields=fields,
+            insecure=insecure,
+            **filters
+        )
+
+        for obj_values in db_list:
+            # Note: in case if only certain fields have been requested
+            # "db_list" contains tuples with values of db objects.
+            rest_resources.append(
+                cls.from_tuples(zip(fields, obj_values))
+            )
+    else:
+        r.call(_get_all_function)
+
     return list_cls.convert_with_links(
         rest_resources,
         limit,
@@ -222,4 +237,22 @@ def get_all(list_cls, cls, get_all_function, get_function,
         sort_dirs=','.join(sort_dirs),
         fields=','.join(fields) if fields else '',
         **filters
+    )
+
+
+class MistralRetrying(tenacity.Retrying):
+    def call(self, fn, *args, **kwargs):
+        try:
+            return super(MistralRetrying, self).call(fn, *args, **kwargs)
+        except tenacity.RetryError:
+            raise exc.MistralError("The service is temporarily unavailable")
+
+
+def create_db_retry_object():
+    return MistralRetrying(
+        retry=tenacity.retry_if_exception_type(
+            (sa.exc.OperationalError, db_exc.DBConnectionError)
+        ),
+        stop=tenacity.stop_after_attempt(10),
+        wait=tenacity.wait_incrementing(increment=0.2)  # 0.2 seconds
     )

@@ -14,7 +14,9 @@
 #    limitations under the License.
 
 from functools import partial
+import warnings
 
+from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from stevedore import extension
 import yaml
@@ -24,6 +26,7 @@ from mistral.db.v2 import api as db_api
 from mistral import utils
 
 
+LOG = logging.getLogger(__name__)
 ROOT_YAQL_CONTEXT = None
 
 
@@ -101,6 +104,59 @@ def env_(context):
     return context['__env']
 
 
+def executions_(context,
+                id=None,
+                root_execution_id=None,
+                state=None,
+                from_time=None,
+                to_time=None
+                ):
+
+    filter = {}
+
+    if id is not None:
+        filter = utils.filter_utils.create_or_update_filter(
+            'id',
+            id,
+            "eq",
+            filter
+        )
+
+    if root_execution_id is not None:
+        filter = utils.filter_utils.create_or_update_filter(
+            'root_execution_id',
+            root_execution_id,
+            "eq",
+            filter
+        )
+
+    if state is not None:
+        filter = utils.filter_utils.create_or_update_filter(
+            'state',
+            state,
+            "eq",
+            filter
+        )
+
+    if from_time is not None:
+        filter = utils.filter_utils.create_or_update_filter(
+            'created_at',
+            from_time,
+            "gte",
+            filter
+        )
+
+    if to_time is not None:
+        filter = utils.filter_utils.create_or_update_filter(
+            'created_at',
+            to_time,
+            "lt",
+            filter
+        )
+
+    return db_api.get_workflow_executions(**filter)
+
+
 def execution_(context):
     wf_ex = db_api.get_workflow_execution(context['__execution']['id'])
 
@@ -116,10 +172,19 @@ def execution_(context):
 
 
 def json_pp_(context, data=None):
+    warnings.warn(
+        "json_pp was deprecated in Queens and will be removed in the S cycle. "
+        "The json_dump expression function can be used for outputting JSON",
+        DeprecationWarning
+    )
     return jsonutils.dumps(
         data or context,
         indent=4
     ).replace("\\n", "\n").replace(" \n", "\n")
+
+
+def json_dump_(context, data):
+    return jsonutils.dumps(data, indent=4)
 
 
 def yaml_dump_(context, data):
@@ -150,6 +215,10 @@ def task_(context, task_name=None):
         task_ex = task_execs[-1] if len(task_execs) > 0 else None
 
     if not task_ex:
+        LOG.warning(
+            "Task '%s' not found by the task() expression function",
+            task_name
+        )
         return None
 
     # We don't use to_dict() db model method because not all fields
@@ -235,7 +304,6 @@ def _get_tasks_from_db(workflow_execution_id=None, recursive=False, state=None,
 
 def tasks_(context, workflow_execution_id=None, recursive=False, state=None,
            flat=False):
-
     task_execs = _get_tasks_from_db(
         workflow_execution_id,
         recursive,
@@ -265,6 +333,7 @@ def _convert_to_user_model(task_ex):
         'workflow_execution_id': task_ex.workflow_execution_id,
         'created_at': task_ex.created_at.isoformat(' '),
         'updated_at': task_ex.updated_at.isoformat(' ')
+        if task_ex.updated_at is not None else None
     }
 
 

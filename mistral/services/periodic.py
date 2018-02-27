@@ -34,60 +34,75 @@ CONF = cfg.CONF
 _periodic_tasks = {}
 
 
-class MistralPeriodicTasks(periodic_task.PeriodicTasks):
-    @periodic_task.periodic_task(spacing=1, run_immediately=True)
-    def process_cron_triggers_v2(self, ctx):
-        for trigger in triggers.get_next_cron_triggers():
-            LOG.debug("Processing cron trigger: %s", trigger)
+def process_cron_triggers_v2(self, ctx):
+    LOG.debug("Processing cron triggers...")
 
-            try:
-                # Setup admin context before schedule triggers.
-                ctx = security.create_context(
-                    trigger.trust_id, trigger.project_id
+    for trigger in triggers.get_next_cron_triggers():
+        LOG.debug("Processing cron trigger: %s", trigger)
+
+        try:
+            # Setup admin context before schedule triggers.
+            ctx = security.create_context(
+                trigger.trust_id,
+                trigger.project_id
+            )
+
+            auth_ctx.set_ctx(ctx)
+
+            LOG.debug("Cron trigger security context: %s", ctx)
+
+            # Try to advance the cron trigger next_execution_time and
+            # remaining_executions if relevant.
+            modified = advance_cron_trigger(trigger)
+
+            # If cron trigger was not already modified by another engine.
+            if modified:
+                LOG.debug(
+                    "Starting workflow '%s' by cron trigger '%s'",
+                    trigger.workflow.name,
+                    trigger.name
                 )
 
-                auth_ctx.set_ctx(ctx)
-                LOG.debug("Cron trigger security context: %s", ctx)
-
-                # Try to advance the cron trigger next_execution_time and
-                # remaining_executions if relevant.
-                modified = advance_cron_trigger(trigger)
-
-                # If cron trigger was not already modified by another engine.
-                if modified:
-                    LOG.debug(
-                        "Starting workflow '%s' by cron trigger '%s'",
-                        trigger.workflow.name,
-                        trigger.name
-                    )
-
-                    description = {
-                        "description": (
-                            "Workflow execution created by cron"
-                            " trigger '(%s)'." % trigger.id
-                        ),
-                        "triggered_by": {
-                            "type": "cron_trigger",
-                            "id": trigger.id,
-                            "name": trigger.name,
-                        }
+                description = {
+                    "description": (
+                        "Workflow execution created by cron"
+                        " trigger '(%s)'." % trigger.id
+                    ),
+                    "triggered_by": {
+                        "type": "cron_trigger",
+                        "id": trigger.id,
+                        "name": trigger.name,
                     }
+                }
 
-                    rpc.get_engine_client().start_workflow(
-                        trigger.workflow.name,
-                        trigger.workflow.namespace,
-                        trigger.workflow_input,
-                        description=json.dumps(description),
-                        **trigger.workflow_params
-                    )
-            except Exception:
-                # Log and continue to next cron trigger.
-                LOG.exception(
-                    "Failed to process cron trigger %s",
-                    str(trigger)
+                rpc.get_engine_client().start_workflow(
+                    trigger.workflow.name,
+                    trigger.workflow.namespace,
+                    None,
+                    trigger.workflow_input,
+                    description=json.dumps(description),
+                    **trigger.workflow_params
                 )
-            finally:
-                auth_ctx.set_ctx(None)
+        except Exception:
+            # Log and continue to next cron trigger.
+            LOG.exception(
+                "Failed to process cron trigger %s",
+                str(trigger)
+            )
+        finally:
+            auth_ctx.set_ctx(None)
+
+
+class MistralPeriodicTasks(periodic_task.PeriodicTasks):
+
+    def __init__(self, conf):
+        super(MistralPeriodicTasks, self).__init__(conf)
+
+        periodic_task_ = periodic_task.periodic_task(
+            spacing=CONF.cron_trigger.execution_interval,
+            run_immediately=True,
+        )
+        self.add_periodic_task(periodic_task_(process_cron_triggers_v2))
 
 
 def advance_cron_trigger(t):
@@ -158,6 +173,7 @@ def setup():
 
 
 def stop_all_periodic_tasks():
-    for pt, tg in _periodic_tasks.items():
+    for tg in _periodic_tasks.values():
         tg.stop()
-        del _periodic_tasks[pt]
+
+    _periodic_tasks.clear()

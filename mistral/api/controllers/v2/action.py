@@ -55,9 +55,11 @@ class ActionsController(rest.RestController, hooks.HookController):
 
         acl.enforce('actions:get', context.ctx())
 
-        LOG.info("Fetch action [identifier=%s]", identifier)
+        LOG.debug("Fetch action [identifier=%s]", identifier)
 
-        db_model = db_api.get_action_definition(identifier)
+        # Use retries to prevent possible failures.
+        r = rest_utils.create_db_retry_object()
+        db_model = r.call(db_api.get_action_definition, identifier)
 
         return resources.Action.from_db_model(db_model)
 
@@ -76,7 +78,7 @@ class ActionsController(rest.RestController, hooks.HookController):
 
         definition = pecan.request.text
 
-        LOG.info("Update action(s) [definition=%s]", definition)
+        LOG.debug("Update action(s) [definition=%s]", definition)
 
         scope = pecan.request.GET.get('scope', 'private')
 
@@ -119,7 +121,7 @@ class ActionsController(rest.RestController, hooks.HookController):
                 "%s" % (resources.SCOPE_TYPES.values, scope)
             )
 
-        LOG.info("Create action(s) [definition=%s]", definition)
+        LOG.debug("Create action(s) [definition=%s]", definition)
 
         with db_api.transaction():
             db_acts = actions.create_actions(definition, scope=scope)
@@ -139,7 +141,7 @@ class ActionsController(rest.RestController, hooks.HookController):
         """
         acl.enforce('actions:delete', context.ctx())
 
-        LOG.info("Delete action [identifier=%s]", identifier)
+        LOG.debug("Delete action [identifier=%s]", identifier)
 
         with db_api.transaction():
             db_model = db_api.get_action_definition(identifier)
@@ -204,9 +206,9 @@ class ActionsController(rest.RestController, hooks.HookController):
             input=input
         )
 
-        LOG.info("Fetch actions. marker=%s, limit=%s, sort_keys=%s, "
-                 "sort_dirs=%s, filters=%s", marker, limit, sort_keys,
-                 sort_dirs, filters)
+        LOG.debug("Fetch actions. marker=%s, limit=%s, sort_keys=%s, "
+                  "sort_dirs=%s, filters=%s", marker, limit, sort_keys,
+                  sort_dirs, filters)
 
         return rest_utils.get_all(
             resources.Actions,

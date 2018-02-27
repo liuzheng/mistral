@@ -1,5 +1,6 @@
 # Copyright 2016 - Nokia Networks.
 # Copyright 2016 - Brocade Communications Systems, Inc.
+# Copyright 2018 - Extreme Networks, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 #    you may not use this file except in compliance with the License.
@@ -26,6 +27,8 @@ from mistral.engine import dispatcher
 from mistral.engine import utils as engine_utils
 from mistral import exceptions as exc
 from mistral.lang import parser as spec_parser
+from mistral.notifiers import base as notif
+from mistral.notifiers import notification_events as events
 from mistral.services import triggers
 from mistral.services import workflows as wf_service
 from mistral import utils
@@ -61,14 +64,33 @@ class Workflow(object):
         else:
             self.wf_spec = None
 
+    def notify(self, event):
+        publishers = self.wf_ex.params.get('notify')
+
+        if not publishers and not isinstance(publishers, list):
+            return
+
+        notifier = notif.get_notifier(cfg.CONF.notifier.type)
+
+        notifier.notify(
+            self.wf_ex.id,
+            self.wf_ex.to_dict(),
+            event,
+            self.wf_ex.updated_at,
+            publishers
+        )
+
     @profiler.trace('workflow-start')
-    def start(self, wf_def, input_dict, desc='', params=None):
+    def start(self, wf_def, wf_ex_id, input_dict, desc='', params=None):
         """Start workflow.
 
         :param wf_def: Workflow definition.
+        :param wf_ex_id: Workflow execution id.
         :param input_dict: Workflow input.
         :param desc: Workflow execution description.
         :param params: Workflow type specific parameters.
+
+        :raises
         """
 
         assert not self.wf_ex
@@ -89,12 +111,16 @@ class Workflow(object):
 
         self._create_execution(
             wf_def,
+            wf_ex_id,
             self.prepare_input(input_dict),
             desc,
             params
         )
 
         self.set_state(states.RUNNING)
+
+        # Publish event as soon as state is set to running.
+        self.notify(events.WORKFLOW_LAUNCHED)
 
         wf_ctrl = wf_base.get_controller(self.wf_ex, self.wf_spec)
 
@@ -109,7 +135,6 @@ class Workflow(object):
         :param state: New workflow state.
         :param msg: Additional explaining message.
         """
-
         assert self.wf_ex
 
         if state == states.SUCCESS:
@@ -133,14 +158,15 @@ class Workflow(object):
         # Set the state of this workflow to paused.
         self.set_state(states.PAUSED, state_info=msg)
 
+        # Publish event.
+        self.notify(events.WORKFLOW_PAUSED)
+
         # If workflow execution is a subworkflow,
         # schedule update to the task execution.
         if self.wf_ex.task_execution_id:
             # Import the task_handler module here to avoid circular reference.
             from mistral.engine import task_handler
             task_handler.schedule_on_action_update(self.wf_ex)
-
-        return
 
     def resume(self, env=None):
         """Resume workflow.
@@ -153,6 +179,9 @@ class Workflow(object):
         wf_service.update_workflow_execution_env(self.wf_ex, env)
 
         self.set_state(states.RUNNING)
+
+        # Publish event.
+        self.notify(events.WORKFLOW_RESUMED)
 
         wf_ctrl = wf_base.get_controller(self.wf_ex)
 
@@ -253,8 +282,9 @@ class Workflow(object):
 
         return final_context
 
-    def _create_execution(self, wf_def, input_dict, desc, params):
+    def _create_execution(self, wf_def, wf_ex_id, input_dict, desc, params):
         self.wf_ex = db_api.create_workflow_execution({
+            'id': wf_ex_id,
             'name': wf_def.name,
             'description': desc,
             'workflow_name': wf_def.name,
@@ -296,7 +326,17 @@ class Workflow(object):
         cur_state = self.wf_ex.state
 
         if states.is_valid_transition(cur_state, state):
-            self.wf_ex.state = state
+            wf_ex = db_api.update_workflow_execution_state(
+                id=self.wf_ex.id,
+                cur_state=cur_state,
+                state=state
+            )
+
+            if wf_ex is None:
+                # Do nothing because the state was updated previously.
+                return
+
+            self.wf_ex = wf_ex
             self.wf_ex.state_info = state_info
 
             wf_trace.info(
@@ -388,6 +428,9 @@ class Workflow(object):
         # Set workflow execution to success until after output is evaluated.
         self.set_state(states.SUCCESS, msg)
 
+        # Publish event.
+        self.notify(events.WORKFLOW_SUCCEEDED)
+
         if self.wf_ex.task_execution_id:
             self._send_result_to_parent_workflow()
 
@@ -415,12 +458,26 @@ class Workflow(object):
 
         # When we set an ERROR state we should safely set output value getting
         # w/o exceptions due to field size limitations.
-        msg = utils.cut_by_kb(
-            msg,
-            cfg.CONF.engine.execution_field_size_limit_kb
-        )
+
+        length_output_on_error = len(str(output_on_error).encode("utf-8"))
+        total_output_length = utils.get_number_of_chars_from_kilobytes(
+            cfg.CONF.engine.execution_field_size_limit_kb)
+
+        if length_output_on_error < total_output_length:
+            msg = utils.cut_by_char(
+                msg,
+                total_output_length - length_output_on_error
+            )
+        else:
+            msg = utils.cut_by_kb(
+                msg,
+                cfg.CONF.engine.execution_field_size_limit_kb
+            )
 
         self.wf_ex.output = merge_dicts({'result': msg}, output_on_error)
+
+        # Publish event.
+        self.notify(events.WORKFLOW_FAILED)
 
         if self.wf_ex.task_execution_id:
             self._send_result_to_parent_workflow()
@@ -439,6 +496,9 @@ class Workflow(object):
         )
 
         self.wf_ex.output = {'result': msg}
+
+        # Publish event.
+        self.notify(events.WORKFLOW_CANCELLED)
 
         if self.wf_ex.task_execution_id:
             self._send_result_to_parent_workflow()

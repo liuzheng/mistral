@@ -12,13 +12,16 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
+import mock
 from oslo_config import cfg
+from oslo_db import exception as db_exc
 
 from mistral.db.v2 import api as db_api
 from mistral import exceptions as exc
 from mistral.services import workbooks as wb_service
 from mistral.services import workflows as wf_service
 from mistral.tests.unit.engine import base
+from mistral.utils import expression_utils
 from mistral.workflow import states
 from mistral_lib import actions as actions_base
 
@@ -88,7 +91,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.assertEqual(states.RUNNING, wf_ex.state)
         self.assertIsNotNone(db_api.get_workflow_execution(wf_ex.id))
@@ -119,7 +122,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -149,7 +152,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -207,7 +210,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -258,7 +261,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -294,7 +297,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
         # of action error and task has 'wait-before' policy. It is an
         # implicit test for task continuation because 'wait-before' inserts
         # a delay between preparing task execution object and scheduling
-        # actions. If an an error happens during scheduling actions (e.g.
+        # actions. If an error happens during scheduling actions (e.g.
         # invalid YAQL in action parameters) then we also need to handle
         # this properly, meaning that task and workflow state should go
         # into ERROR state.
@@ -310,7 +313,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -337,7 +340,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
         # of action error and task has 'wait-after' policy. It is an
         # implicit test for task completion because 'wait-after' inserts
         # a delay between actual task completion and logic that calculates
-        # next workflow commands. If an an error happens while calculating
+        # next workflow commands. If an error happens while calculating
         # next commands (e.g. invalid YAQL in on-XXX clauses) then we also
         # need to handle this properly, meaning that task and workflow state
         # should go into ERROR state.
@@ -358,7 +361,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -399,7 +402,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -427,7 +430,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -454,7 +457,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -482,7 +485,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -511,7 +514,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -546,7 +549,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -585,7 +588,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wb_service.create_workbook_v2(wb_text)
 
-        wf_ex = self.engine.start_workflow('wb.wf', '', {})
+        wf_ex = self.engine.start_workflow('wb.wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -621,7 +624,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -657,7 +660,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -688,7 +691,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -728,7 +731,7 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         wf_service.create_workflows(wf_text)
 
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_error(wf_ex.id)
 
@@ -741,3 +744,83 @@ class ErrorHandlingEngineTest(base.EngineTestCase):
 
         self.assertIn("UnicodeDecodeError: utf", wf_ex.state_info)
         self.assertIn("UnicodeDecodeError: utf", task_ex.state_info)
+
+    @mock.patch(
+        'mistral.utils.expression_utils.get_yaql_context',
+        mock.MagicMock(
+            side_effect=[
+                db_exc.DBDeadlock(),  # Emulating DB deadlock
+                expression_utils.get_yaql_context({})  # Successful run
+            ]
+        )
+    )
+    def test_db_error_in_yaql_expression(self):
+        # This test just checks that the workflow completes successfully
+        # even if a DB deadlock occurs during YAQL expression evaluation.
+        # The engine in this case should should just retry the transactional
+        # method.
+        wf_text = """---
+        version: '2.0'
+
+        wf:
+          tasks:
+            task1:
+              action: std.echo output="Hello"
+              publish:
+                my_var: <% 1 + 1 %>
+        """
+
+        wf_service.create_workflows(wf_text)
+
+        wf_ex = self.engine.start_workflow('wf')
+
+        self.await_workflow_success(wf_ex.id)
+
+        with db_api.transaction():
+            wf_ex = db_api.get_workflow_execution(wf_ex.id)
+
+            self.assertEqual(1, len(wf_ex.task_executions))
+
+            task_ex = wf_ex.task_executions[0]
+
+            self.assertDictEqual({'my_var': 2}, task_ex.published)
+
+    @mock.patch(
+        'mistral.utils.expression_utils.get_jinja_context',
+        mock.MagicMock(
+            side_effect=[
+                db_exc.DBDeadlock(),  # Emulating DB deadlock
+                expression_utils.get_jinja_context({})  # Successful run
+            ]
+        )
+    )
+    def test_db_error_in_jinja_expression(self):
+        # This test just checks that the workflow completes successfully
+        # even if a DB deadlock occurs during Jinja expression evaluation.
+        # The engine in this case should should just retry the transactional
+        # method.
+        wf_text = """---
+        version: '2.0'
+
+        wf:
+          tasks:
+            task1:
+              action: std.echo output="Hello"
+              publish:
+                my_var: "{{ 1 + 1 }}"
+        """
+
+        wf_service.create_workflows(wf_text)
+
+        wf_ex = self.engine.start_workflow('wf')
+
+        self.await_workflow_success(wf_ex.id)
+
+        with db_api.transaction():
+            wf_ex = db_api.get_workflow_execution(wf_ex.id)
+
+            self.assertEqual(1, len(wf_ex.task_executions))
+
+            task_ex = wf_ex.task_executions[0]
+
+            self.assertDictEqual({'my_var': 2}, task_ex.published)

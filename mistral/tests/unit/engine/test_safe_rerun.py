@@ -25,7 +25,8 @@ from mistral.workflow import states
 
 
 def _run_at_target(action_ex_id, action_class_str, attributes,
-                   action_params, safe_rerun, target=None, async_=True):
+                   action_params, safe_rerun, execution_context, target=None,
+                   async_=True, timeout=None):
     # We'll just call executor directly for testing purposes.
     executor = d_exe.DefaultExecutor()
 
@@ -35,6 +36,7 @@ def _run_at_target(action_ex_id, action_class_str, attributes,
         attributes,
         action_params,
         safe_rerun,
+        execution_context,
         redelivered=True
     )
 
@@ -72,7 +74,7 @@ class TestSafeRerun(base.EngineTestCase):
         # to true.
 
         wf_service.create_workflows(wf_text)
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_success(wf_ex.id)
 
@@ -118,7 +120,7 @@ class TestSafeRerun(base.EngineTestCase):
         # to true.
 
         wf_service.create_workflows(wf_text)
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_success(wf_ex.id)
 
@@ -153,7 +155,7 @@ class TestSafeRerun(base.EngineTestCase):
         """
 
         wf_service.create_workflows(wf_text)
-        wf_ex = self.engine.start_workflow('wf', '', {})
+        wf_ex = self.engine.start_workflow('wf')
 
         self.await_workflow_success(wf_ex.id)
 

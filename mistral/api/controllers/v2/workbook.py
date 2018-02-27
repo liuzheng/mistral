@@ -51,9 +51,11 @@ class WorkbooksController(rest.RestController, hooks.HookController):
         """
         acl.enforce('workbooks:get', context.ctx())
 
-        LOG.info("Fetch workbook [name=%s]", name)
+        LOG.debug("Fetch workbook [name=%s]", name)
 
-        db_model = db_api.get_workbook(name)
+        # Use retries to prevent possible failures.
+        r = rest_utils.create_db_retry_object()
+        db_model = r.call(db_api.get_workbook, name)
 
         return resources.Workbook.from_db_model(db_model)
 
@@ -65,7 +67,7 @@ class WorkbooksController(rest.RestController, hooks.HookController):
 
         definition = pecan.request.text
 
-        LOG.info("Update workbook [definition=%s]", definition)
+        LOG.debug("Update workbook [definition=%s]", definition)
 
         wb_db = workbooks.update_workbook_v2(definition)
 
@@ -79,7 +81,7 @@ class WorkbooksController(rest.RestController, hooks.HookController):
 
         definition = pecan.request.text
 
-        LOG.info("Create workbook [definition=%s]", definition)
+        LOG.debug("Create workbook [definition=%s]", definition)
 
         wb_db = workbooks.create_workbook_v2(definition)
 
@@ -96,7 +98,7 @@ class WorkbooksController(rest.RestController, hooks.HookController):
         """
         acl.enforce('workbooks:delete', context.ctx())
 
-        LOG.info("Delete workbook [name=%s]", name)
+        LOG.debug("Delete workbook [name=%s]", name)
 
         db_api.delete_workbook(name)
 
@@ -145,9 +147,9 @@ class WorkbooksController(rest.RestController, hooks.HookController):
             updated_at=updated_at
         )
 
-        LOG.info("Fetch workbooks. marker=%s, limit=%s, sort_keys=%s, "
-                 "sort_dirs=%s, fields=%s, filters=%s", marker, limit,
-                 sort_keys, sort_dirs, fields, filters)
+        LOG.debug("Fetch workbooks. marker=%s, limit=%s, sort_keys=%s, "
+                  "sort_dirs=%s, fields=%s, filters=%s", marker, limit,
+                  sort_keys, sort_dirs, fields, filters)
 
         return rest_utils.get_all(
             resources.Workbooks,
