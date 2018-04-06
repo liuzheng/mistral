@@ -3,9 +3,6 @@
 # IS_ENTERPRISE (default: 0)
 # PACKAGECLOUD_ORGANIZATION (default: stackstorm)
 # PACKAGECLOUD_TOKEN
-# DOCKER_USER
-# DOCKER_EMAIL
-# DOCKER_PASSWORD
 general:
   # Don't run CI for PR, only for major branches
   branches:
@@ -25,7 +22,6 @@ machine:
     ST2_PACKAGES_BRANCH: master
     # XXX: Set this to 'st2-X.Y.Z' for the release branches
     ST2MISTRAL_GITREV: master
-    ST2_DOCKERFILES_REPO: https://github.com/StackStorm/st2-dockerfiles
     ST2_PACKAGES: "st2mistral"
     BUILD_DOCKER: 0
     DEPLOY_DOCKER: 0
@@ -90,8 +86,6 @@ deployment:
       - |
         DISTROS=($DISTROS)
         parallel -v -j0 --line-buffer .circle/packagecloud.sh deploy {} ~/packages/{} ::: ${DISTROS[@]::$CIRCLE_NODE_TOTAL}
-      - .circle/docker.sh deploy st2mistral
-      - .circle/save_payload.py ~/packages
 
 experimental:
   notify:
