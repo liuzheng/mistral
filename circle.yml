@@ -81,7 +81,7 @@ jobs:
           command: |
             .circle/docker-compose2.sh build ${DISTRO}
             # Once build container finishes we can copy packages directly from it
-            docker cp st2-packages-vol:/root/build/. ~/st2/packages/${DISTRO}
+            docker cp st2-packages-vol:/root/build/. ~/mistral/packages/${DISTRO}
           working_directory: ~/st2-packages
 #      # TODO: It works! (~0.5-1min speed-up) Enable CircleCI2.0 cache for pip and wheelhouse later
 #      - run:
@@ -92,7 +92,7 @@ jobs:
 #            docker cp st2-packages-vol:/root/build /tmp/st2-packages
 #          working_directory: ~/st2-packages
       - store_artifacts:
-          path: ~/st2/packages
+          path: ~/mistral/packages
           destination: packages
       - persist_to_workspace:
           root: packages
