@@ -5,6 +5,7 @@
 version: 2
 jobs:
   # Build st2mistral packages
+  # NB! We can't run mistral tests without st2 being installed, so we just build mistral package here
   packages:
     parallelism: 4
     # 4CPUs & 8GB RAM CircleCI machine
@@ -142,7 +143,7 @@ jobs:
 # Putting everything together
 workflows:
   version: 2
-  package-test-and-deploy:
+  mistral-build-deploy:
     jobs:
       - packages
       - deploy:
