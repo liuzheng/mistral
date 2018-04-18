@@ -1,91 +1,159 @@
 # Setup in CircleCI account the following ENV variables:
-# IS_PRODUCTION (default: 0)
-# IS_ENTERPRISE (default: 0)
 # PACKAGECLOUD_ORGANIZATION (default: stackstorm)
 # PACKAGECLOUD_TOKEN
-general:
-  # Don't run CI for PR, only for major branches
-  branches:
-    only:
-      - master
-      - /st2-[0-9]+\.[0-9]+\.[0-9]+/
-  build_dir: st2-packages
-  artifacts:
-    - ~/packages
 
-machine:
-  environment:
-    DISTROS: "trusty xenial el6 el7"
-    NOTESTS: "xenial el7"
-    ST2_PACKAGES_REPO: https://github.com/StackStorm/st2-packages
-    # XXX: Set this to 'vX.Y' for release branches
-    ST2_PACKAGES_BRANCH: master
-    # XXX: Set this to 'st2-X.Y.Z' for the release branches
-    ST2MISTRAL_GITREV: master
-    ST2_PACKAGES: "st2mistral"
-    BUILD_DOCKER: 0
-    DEPLOY_DOCKER: 0
-    DEPLOY_PACKAGES: 1
-  ruby:
-    version: ruby-2.0.0-p645
-  pre:
-    - mkdir -p ~/packages
-    # Need latest Docker version for some features to work (CircleCI by default works with outdated version)
-    - |
-      sudo curl -L -o /usr/bin/docker 'http://s3-external-1.amazonaws.com/circle-downloads/docker-1.9.0-circleci'
-      sudo chmod 0755 /usr/bin/docker
-  services:
-    - docker
-    - postgresql
-    - rabbitmq-server
+version: 2
+jobs:
+  # Build st2mistral packages
+  packages:
+    parallelism: 4
+    # 4CPUs & 8GB RAM CircleCI machine
+    # sadly, it doesn't work with 'setup_remote_docker'
+    resource_class: large
+    docker:
+      # The primary container is an instance of the first list image listed. Your build commands run in this container.
+      - image: circleci/python:2.7
+    working_directory: ~/mistral
+    environment:
+      - DISTROS: "trusty xenial el6 el7"
+      - ST2_PACKAGES_REPO: https://github.com/StackStorm/st2-packages
+      - ST2_PACKAGES: "st2mistral"
+      # XXX: Set this to 'vX.Y' for release branches
+      - ST2_PACKAGES_BRANCH: master
+      # XXX: Set this to 'st2-X.Y.Z' for the release branches
+      - ST2MISTRAL_GITREV: master
+      - ST2MISTRAL_CHECKOUT: 0
+      - ST2MISTRAL_GITDIR: /tmp/mistral
+      - BASH_ENV: ~/.buildenv
+    steps:
+      - checkout
+      - setup_remote_docker:
+          reusable: true    # default - false
+          exclusive: true   # default - true
+      - run:
+          name: Docker version
+          command: |
+            set -x
+            docker --version
+            docker-compose --version
+      - run:
+          name: Download st2-packages repository
+          command: |
+            set -x
+            git clone ${ST2_PACKAGES_REPO} ~/st2-packages
+            cd ~/st2-packages
+            git checkout ${ST2_PACKAGES_BRANCH} || true
+      - run:
+          name: Initialize packages Build Environment
+          command: .circle/buildenv_mistral.sh
+          working_directory: ~/st2-packages
+      # Verify that Docker environment is properly cleaned up and there is nothing left from the previous build
+      # See issue: https://discuss.circleci.com/t/no-space-left-on-device-while-creating-mongo/11532/13
+      - run:
+          name: Pre Docker cleanup
+          command: |
+            set -x
+            # Clean-up running containers
+            .circle/docker-compose2.sh clean
+            # Remove st2-packages-vol container
+            docker rm -v --force st2-packages-vol || true
+            # Clean-up any created volumes
+            docker volume prune --force
+          working_directory: ~/st2-packages
+      - run:
+          # Workaround for CircleCI docker-compose limitation where volumes don't work
+          # See detailed explanation: https://circleci.com/docs/2.0/building-docker-images/#mounting-folders
+          name: Copy st2-packages files to build containers
+          command: |
+            # creating dummy container which will hold a volume with data files
+            docker create -v /root/st2-packages -v ${ST2MISTRAL_GITDIR} -v /root/build -v /root/.cache/pip -v /tmp/wheelhouse --name st2-packages-vol alpine:3.4 /bin/true
+            # copy st2-packages data files into this volume
+            docker cp ~/st2-packages st2-packages-vol:/root
+            # copy mistral source files into this volume
+            docker cp . st2-packages-vol:${ST2MISTRAL_GITDIR}
+      - run:
+          name: Pull dependent Docker Images
+          command: .circle/docker-compose2.sh pull ${DISTRO}
+          working_directory: ~/st2-packages
+      - run:
+          name: Build the ${DISTRO} Packages
+          command: |
+            .circle/docker-compose2.sh build ${DISTRO}
+            # Once build container finishes we can copy packages directly from it
+            docker cp st2-packages-vol:/root/build/. ~/st2/packages/${DISTRO}
+          working_directory: ~/st2-packages
+#      # TODO: It works! (~0.5-1min speed-up) Enable CircleCI2.0 cache for pip and wheelhouse later
+#      - run:
+#          name: Build the ${DISTRO} Packages 2nd time (compare with pip/wheelhouse cached)
+#          command: |
+#            .circle/docker-compose2.sh build ${DISTRO}
+#            # Once build container finishes we can copy packages directly from it
+#            docker cp st2-packages-vol:/root/build /tmp/st2-packages
+#          working_directory: ~/st2-packages
+      - store_artifacts:
+          path: ~/st2/packages
+          destination: packages
+      - persist_to_workspace:
+          root: packages
+          paths:
+            - .
+      # Verify that Docker environment is properly cleaned up, and there is nothing left for the next build
+      # See issue: https://discuss.circleci.com/t/no-space-left-on-device-while-creating-mongo/11532/13
+      - run:
+          name: Post Docker cleanup
+          # don't cleanup resources on error since failed container might be used for SSH debug
+          when: on_success
+          command: |
+            set -x
+            # Clean-up running containers
+            .circle/docker-compose2.sh clean
+            # Remove st2-packages-vol container
+            docker rm -v --force st2-packages-vol || true
+            # Clean-up any created volumes
+            docker volume prune --force
+          working_directory: ~/st2-packages
 
-checkout:
-  post:
-    - |
-      git clone --depth 1 ${ST2_PACKAGES_REPO} /home/ubuntu/mistral/st2-packages
-      cd /home/ubuntu/mistral/st2-packages
-      git checkout ${ST2_PACKAGES_BRANCH} || true
-    - .circle/buildenv_mistral.sh
+  # Deploy produced deb/rpm packages to PackageCloud staging
+  deploy:
+    docker:
+      # The primary container is an instance of the first list image listed. Your build commands run in this container.
+      - image: circleci/ruby:2.4
+    working_directory: /tmp/deploy
+    environment:
+      - DISTROS: "trusty xenial el6 el7"
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: List workspace files
+          command: find . | sed 's|[^/]*/|  |g'
+      - run:
+          name: Install dependencies
+          command: |
+            set -x
+            sudo apt-get -y install parallel jq
+            gem install package_cloud
+            sudo wget -O /usr/local/bin/packagecloud.sh https://raw.githubusercontent.com/StackStorm/st2-packages/master/.circle/packagecloud.sh && sudo chmod +x /usr/local/bin/packagecloud.sh
+      - run:
+          name: Deploy deb/rpm packages to PackageCloud
+          command: "parallel -v -j0 --line-buffer packagecloud.sh deploy {} {} ::: ${DISTROS}"
 
-dependencies:
-  cache_directories:
-    - ~/.cache/pip
-  pre:
-    - sudo .circle/configure-services.sh
-    - sudo .circle/fix-cache-permissions.sh
-    - sudo apt-get -y install parallel jq
-    - gem install package_cloud
-    - sudo pip install "docker-compose==1.14.0"
-    - docker-compose version
-    - docker version
-  override:
-    - .circle/docker-compose.sh pull ${DISTRO}
-  post:
-    - .circle/docker-compose.sh build ${DISTRO}
-
-test:
-  override:
-    # docker-compose test depends on both mistral and st2 packages being available.
-    # Enable the tests, when there are separate tests for mistral.
-    # - .circle/docker-compose.sh test ${DISTRO}:
-    #    parallel: true
-    # Copy all Packages to node0
-    - rsync -rv /tmp/st2-packages/ node0:~/packages/${DISTRO}:
-        parallel: true
-  # post:
-    # If we ever have docker containers for mistral, enable the following line
-    # - .circle/docker.sh build st2mistral
-
-deployment:
-  publish:
-    owner: StackStorm
-    branch:
-      - master
-      - /st2-[0-9]+\.[0-9]+\.[0-9]+/
-    commands:
-      - |
-        DISTROS=($DISTROS)
-        parallel -v -j0 --line-buffer .circle/packagecloud.sh deploy {} ~/packages/{} ::: ${DISTROS[@]::$CIRCLE_NODE_TOTAL}
+# TODO: Return to workflows when "Auto-cancel redundant builds” feature is implemented for Workflows: https://discuss.circleci.com/t/auto-cancel-redundant-builds-not-working-for-workflow/13852
+# Putting everything together
+workflows:
+  version: 2
+  package-test-and-deploy:
+    jobs:
+      - packages
+      - deploy:
+          requires:
+            - packages
+          filters:
+            branches:
+              only:
+                - master
+                - /st2-[0-9]+\.[0-9]+\.[0-9]+/
+                - feature/circleci
 
 experimental:
   notify:
