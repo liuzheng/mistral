@@ -21,7 +21,7 @@ machine:
     # XXX: Set this to 'vX.Y' for release branches
     ST2_PACKAGES_BRANCH: v2.7
     # XXX: Set this to 'st2-X.Y.Z' for the release branches
-    ST2MISTRAL_GITREV: st2-2.7.0
+    ST2MISTRAL_GITREV: st2-2.7.1
     ST2_PACKAGES: "st2mistral"
     BUILD_DOCKER: 0
     DEPLOY_DOCKER: 0
