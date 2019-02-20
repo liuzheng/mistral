@@ -19,6 +19,10 @@ oslo.config>=5.1.0 # Apache-2.0
 oslo.context>=2.19.2 # Apache-2.0
 oslo.db>=4.27.0 # Apache-2.0
 oslo.i18n>=3.15.3 # Apache-2.0
+# NOTE: oslo.messaging requires kombu 4.2.2 which is broken so we explicitly
+# pin it to a working version here. Keep in mind that this entry needs to be
+# listed before oslo.messaging one
+kombu>=4.2.1,<4.2.2 # Apache-2.0
 oslo.messaging>=5.29.0 # Apache-2.0
 oslo.middleware>=3.31.0 # Apache-2.0
 oslo.policy>=1.30.0 # Apache-2.0
