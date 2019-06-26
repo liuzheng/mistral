@@ -20,9 +20,9 @@ jobs:
       - ST2_PACKAGES_REPO: https://github.com/StackStorm/st2-packages
       - ST2_PACKAGES: "st2mistral"
       # XXX: Set this to 'vX.Y' for release branches
-      - ST2_PACKAGES_BRANCH: master
+      - ST2_PACKAGES_BRANCH: v3.1
       # XXX: Set this to 'st2-X.Y.Z' for the release branches
-      - ST2MISTRAL_GITREV: master
+      - ST2MISTRAL_GITREV: st2-3.1.0
       - ST2MISTRAL_CHECKOUT: 0
       - ST2MISTRAL_GITDIR: /tmp/mistral
       - BASH_ENV: ~/.buildenv
