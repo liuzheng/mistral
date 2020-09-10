@@ -1,5 +1,8 @@
+=============
+DEPRECATED!
+=============
+
 .. warning::
-    **DEPRECATED!**
     Mistral workflow engine fork in StackStorm project is deprecated in favor of native StackStorm Orquesta Workflow Engine.
     Please use Orquesta instead: https://docs.stackstorm.com/orquesta/index.html
 
