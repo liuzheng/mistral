@@ -25,21 +25,21 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       libmysqlclient-dev libpq-dev && \
       pip install -U pip
 
-
 RUN pip install -v mysql-python tox python-mistralclient py_mini_racer -i https://mirrors.aliyun.com/pypi/simple/
 ###  note: js_implementation in mistral use py_mini_racer or pyv8 or v8eval
 ###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
 COPY requirements.txt "${MISTRAL_DIR}/"
-RUN curl -o "${TMP_CONSTRAINTS}" \
-    http://opendev.org/openstack/requirements/raw/branch/master/upper-constraints.txt && \
-    sed -i "/^mistral.*/d" "${TMP_CONSTRAINTS}" && \
-    pip install -r "${MISTRAL_DIR}/requirements.txt"
+#RUN curl -o "${TMP_CONSTRAINTS}" \
+#    http://opendev.org/openstack/requirements/raw/branch/master/upper-constraints.txt && \
+#    sed -i "/^mistral.*/d" "${TMP_CONSTRAINTS}" && \
+#    pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
 
-COPY . ${MISTRAL_DIR}
+COPY . /opt/stack/mistral
 
 RUN mkdir -p /etc/mistral && \
-    pip install -e ${MISTRAL_DIR} -i https://mirrors.aliyun.com/pypi/simple/ && \
+    pip install -e /opt/stack/mistral -i https://mirrors.aliyun.com/pypi/simple/ && \
     find ${MISTRAL_DIR} -name "*.sh" -exec chmod +x {} \;
 
 ENV MISTRAL_DIR="/opt/stack/mistral" \
