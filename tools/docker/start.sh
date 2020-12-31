@@ -9,7 +9,7 @@ if [ ! -f ${CONFIG_FILE} ]; then
       --output-file "${CONFIG_FILE}"
     INI_SET="crudini --set ${CONFIG_FILE}"
 
-    ${INI_SET} DEFAULT js_implementation "py_mini_racer"
+    ${INI_SET} DEFAULT js_implementation "v8eval"
     ${INI_SET} DEFAULT auth_type  "$(perl -e 'print $ENV{"DEFAULT.auth_type"}')"
     ${INI_SET} DEFAULT transport_url "$(perl -e 'print $ENV{"DEFAULT.transport_url"}')"
     ${INI_SET} DEFAULT debug $(perl -e 'print $ENV{"DEFAULT.debug"}')
@@ -23,7 +23,7 @@ if [ ! -f ${CONFIG_FILE} ]; then
     ${INI_SET} oslo_policy policy_file "$(perl -e 'print $ENV{"oslo_policy.policy_file"}')"
 fi
 
-if [ "$(perl -e 'print $ENV{"database.connection"}')" == "sqlite:///data/mistral.db" -a ! -f /data/mistral.db ]
+if [ "$(perl -e 'print $ENV{"database.connection"}')" == "sqlite:////data/mistral.db" -a ! -f /data/mistral.db ]
 then
     mkdir -p /data/
     python ./tools/sync_db.py --config-file "${CONFIG_FILE}"

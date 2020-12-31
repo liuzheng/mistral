@@ -25,8 +25,8 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       libmysqlclient-dev libpq-dev && \
       pip install -U pip
 
-RUN pip install -v mysql-python tox python-mistralclient py_mini_racer -i https://mirrors.aliyun.com/pypi/simple/
-###  note: js_implementation in mistral use py_mini_racer or pyv8 or v8eval
+RUN pip install -v mysql-python tox python-mistralclient v8eval -i https://mirrors.aliyun.com/pypi/simple/
+###  note: js_implementation in mistral use pyv8 or v8eval
 ###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
 COPY requirements.txt "${MISTRAL_DIR}/"
@@ -51,7 +51,7 @@ ENV MISTRAL_DIR="/opt/stack/mistral" \
     DEFAULT.transport_url="rabbit://guest:guest@rabbitmq:5672/" \
     DEFAULT.debug="false" \
     DEFAULT.auth_type="keycloak-oidc" \
-    database.connection="sqlite:///data/mistral.db" \
+    database.connection="sqlite:////data/mistral.db" \
     keycloak_oidc.auth_url="http://keycloak:8080/auth" \
     keycloak_oidc.insecure=true \
     pecan.auth_enable="false" \
