@@ -20,20 +20,21 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       cmake \
       crudini \
       libuv1 \
-      libuv1-dev
+      libuv1-dev \
+      libmysqlclient-dev libpq-dev
 
-RUN pip install -v v8eval && python -c 'import v8eval'
+RUN pip install -U pip
 
-RUN apt-get install -y libmysqlclient-dev && \
-    pip install mysql-python
-
-RUN pip install -U tox python-mistralclient pip
+#RUN pip install -v v8eval mysql-python && python -c 'import v8eval'
+RUN pip install -v mysql-python
+RUN pip install -U tox python-mistralclient
 
 COPY . /opt/stack/mistral
 
-RUN curl -o /tmp/upper-constraints.txt http://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt && \
-    sed -i '/^mistral.*/d' /tmp/upper-constraints.txt &&\
-    pip install -e /opt/stack/mistral
+#RUN curl -o /tmp/upper-constraints.txt http://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt && \
+#    sed -i '/^mistral.*/d' /tmp/upper-constraints.txt &&\
+#    pip install -e /opt/stack/mistral
+RUN pip install -e /opt/stack/mistral
 
 RUN mkdir -p /etc/mistral
 
