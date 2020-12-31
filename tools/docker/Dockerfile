@@ -1,6 +1,6 @@
 FROM krallin/ubuntu-tini:16.04
 
-MAINTAINER Andras Kovi <akovi@nokia.com>
+MAINTAINER liuzheng <liuzheng712@gmail.com>
 
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get -qq update && \
@@ -12,44 +12,51 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       libxml2-dev \
       libxslt1-dev \
       libyaml-dev \
-      mc \
+      python \
       python-dev \
       python-pip \
       python-setuptools \
       swig \
       cmake \
       crudini \
+      gcc \
       libuv1 \
       libuv1-dev \
-      libmysqlclient-dev libpq-dev
+      libmysqlclient-dev libpq-dev && \
+      pip install -U pip
 
-RUN pip install -U pip
 
-#RUN pip install -v v8eval mysql-python && python -c 'import v8eval'
-RUN pip install -v mysql-python tox python-mistralclient v8eval #-i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install -v mysql-python tox python-mistralclient py_mini_racer -i https://mirrors.aliyun.com/pypi/simple/
 ###  note: js_implementation in mistral use py_mini_racer or pyv8 or v8eval
 ###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
-COPY . /opt/stack/mistral
+COPY requirements.txt "${MISTRAL_DIR}/"
+RUN curl -o "${TMP_CONSTRAINTS}" \
+    http://opendev.org/openstack/requirements/raw/branch/master/upper-constraints.txt && \
+    sed -i "/^mistral.*/d" "${TMP_CONSTRAINTS}" && \
+    pip install -r "${MISTRAL_DIR}/requirements.txt"
 
-#RUN curl -o /tmp/upper-constraints.txt http://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt && \
-#    sed -i '/^mistral.*/d' /tmp/upper-constraints.txt &&\
-#    pip install -e /opt/stack/mistral
-RUN pip install -e /opt/stack/mistral
+COPY . ${MISTRAL_DIR}
 
-RUN mkdir -p /etc/mistral
+RUN mkdir -p /etc/mistral && \
+    pip install -e ${MISTRAL_DIR} -i https://mirrors.aliyun.com/pypi/simple/ && \
+    find ${MISTRAL_DIR} -name "*.sh" -exec chmod +x {} \;
 
-RUN oslo-config-generator \
-      --config-file /opt/stack/mistral/tools/config/config-generator.mistral.conf \
-      --output-file /etc/mistral/mistral.conf
+ENV MISTRAL_DIR="/opt/stack/mistral" \
+    TMP_CONSTRAINTS="/tmp/upper-constraints.txt" \
+    CONFIG_FILE="/etc/mistral/mistral.conf" \
+    UPGRADE_DB="false" \
+    DEBIAN_FRONTEND="noninteractive" \
+    MISTRAL_SERVER="all" \
+    DEFAULT.transport_url="rabbit://guest:guest@rabbitmq:5672/" \
+    DEFAULT.debug="false" \
+    DEFAULT.auth_type="keycloak-oidc" \
+    database.connection="sqlite:///data/mistral.db" \
+    keycloak_oidc.auth_url="http://keycloak:8080/auth" \
+    keycloak_oidc.insecure=true \
+    pecan.auth_enable="false" \
+    oslo_policy.policy_file=/opt/stack/mistral/etc/policy.json
 
-RUN INI_SET="crudini --set /etc/mistral/mistral.conf" && \
-    $INI_SET DEFAULT js_implementation v8eval && \
-    $INI_SET DEFAULT transport_url rabbit://guest:guest@rabbitmq:5672/ && \
-    $INI_SET database connection sqlite:///data/mistral.db && \
-    $INI_SET oslo_policy policy_file /opt/stack/mistral/etc/policy.json && \
-    $INI_SET pecan auth_enable false
-
+WORKDIR "${MISTRAL_DIR}"
 EXPOSE 8989
-
-CMD mistral-server --server all
+CMD "${MISTRAL_DIR}/tools/docker/start.sh"
