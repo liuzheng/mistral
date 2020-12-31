@@ -26,8 +26,9 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 RUN pip install -U pip
 
 #RUN pip install -v v8eval mysql-python && python -c 'import v8eval'
-RUN pip install -v mysql-python
-RUN pip install -U tox python-mistralclient
+RUN pip install -v mysql-python tox python-mistralclient v8eval #-i https://mirrors.aliyun.com/pypi/simple/
+###  note: js_implementation in mistral use py_mini_racer or pyv8 or v8eval
+###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
 COPY . /opt/stack/mistral
 
@@ -45,7 +46,7 @@ RUN oslo-config-generator \
 RUN INI_SET="crudini --set /etc/mistral/mistral.conf" && \
     $INI_SET DEFAULT js_implementation v8eval && \
     $INI_SET DEFAULT transport_url rabbit://guest:guest@rabbitmq:5672/ && \
-    $INI_SET database connection mysql://root:strangehat@mysql:3306/mistral && \
+    $INI_SET database connection sqlite:///data/mistral.db && \
     $INI_SET oslo_policy policy_file /opt/stack/mistral/etc/policy.json && \
     $INI_SET pecan auth_enable false
 
