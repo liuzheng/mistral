@@ -25,9 +25,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       libmysqlclient-dev libpq-dev && \
       pip install -U pip
 
-RUN pip install -v mysql-python tox python-mistralclient v8eval -i https://mirrors.aliyun.com/pypi/simple/
-###  note: js_implementation in mistral use pyv8 or v8eval
-###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
+RUN pip install -v mysql-python tox python-mistralclient -i https://mirrors.aliyun.com/pypi/simple/
 
 COPY requirements.txt "${MISTRAL_DIR}/"
 #RUN curl -o "${TMP_CONSTRAINTS}" \
@@ -35,6 +33,10 @@ COPY requirements.txt "${MISTRAL_DIR}/"
 #    sed -i "/^mistral.*/d" "${TMP_CONSTRAINTS}" && \
 #    pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
 RUN pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
+
+RUN pip install -v v8eval -i https://mirrors.aliyun.com/pypi/simple/
+###  note: js_implementation in mistral use pyv8 or v8eval
+###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
 COPY . /opt/stack/mistral
 
