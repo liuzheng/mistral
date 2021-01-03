@@ -34,7 +34,7 @@ COPY requirements.txt "${MISTRAL_DIR}/"
 #    pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
 RUN pip install -r "${MISTRAL_DIR}/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/
 
-RUN pip install -v v8eval -i https://mirrors.aliyun.com/pypi/simple/
+# RUN pip install -v v8eval -i https://mirrors.aliyun.com/pypi/simple/
 ###  note: js_implementation in mistral use pyv8 or v8eval
 ###        it can be find in https://docs.openstack.org/mistral/latest/user/wf_lang_v2.html
 
@@ -50,14 +50,14 @@ ENV MISTRAL_DIR="/opt/stack/mistral" \
     UPGRADE_DB="false" \
     DEBIAN_FRONTEND="noninteractive" \
     MISTRAL_SERVER="all" \
-    DEFAULT.transport_url="rabbit://guest:guest@rabbitmq:5672/" \
-    DEFAULT.debug="false" \
-    DEFAULT.auth_type="keycloak-oidc" \
-    database.connection="sqlite:////data/mistral.db" \
-    keycloak_oidc.auth_url="http://keycloak:8080/auth" \
-    keycloak_oidc.insecure=true \
-    pecan.auth_enable="false" \
-    oslo_policy.policy_file=/opt/stack/mistral/etc/policy.json
+    DEFAULT__transport_url="rabbit://guest:guest@rabbitmq:5672/" \
+    DEFAULT__debug="false" \
+    DEFAULT__auth_type="keycloak-oidc" \
+    database__connection="sqlite:////data/mistral.db" \
+    keycloak_oidc__auth_url="http://keycloak:8080/auth" \
+    keycloak_oidc__insecure=true \
+    pecan__auth_enable="false" \
+    oslo_policy__policy_file=/opt/stack/mistral/etc/policy.json
 
 WORKDIR "${MISTRAL_DIR}"
 EXPOSE 8989
